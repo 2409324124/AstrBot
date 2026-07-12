@@ -1,6 +1,8 @@
 import asyncio
 import datetime
 import random
+import re
+import time
 import uuid
 from collections import defaultdict, deque
 
@@ -45,6 +47,7 @@ class GroupChatContext:
         self._locks: dict[str, asyncio.Lock] = {}
         self.raw_records: dict[str, deque[str]] = defaultdict(deque)
         self._record_ids: dict[str, deque[str]] = defaultdict(deque)
+        self._last_active_reply_at: dict[str, float] = {}
 
     def _get_lock(self, umo: str) -> asyncio.Lock:
         lock = self._locks.get(umo)
@@ -83,6 +86,19 @@ class GroupChatContext:
             "ar_possibility": ar_possibility,
             "ar_prompt": ar_prompt,
             "ar_whitelist": ar_whitelist,
+            "ar_relevance_threshold": active_reply.get(
+                "relevance_threshold",
+                0.55,
+            ),
+            "ar_context_messages": _positive_int(
+                active_reply.get("context_messages", 12),
+                12,
+            ),
+            "ar_trigger_keywords": active_reply.get("trigger_keywords", []),
+            "ar_cooldown_seconds": _non_negative_float(
+                active_reply.get("cooldown_seconds", 120),
+                120,
+            ),
         }
 
     async def get_image_caption(
@@ -125,7 +141,50 @@ class GroupChatContext:
         match cfg["ar_method"]:
             case "possibility_reply":
                 return random.random() < cfg["ar_possibility"]
+            case "relevance_reply":
+                now = time.monotonic()
+                last_reply_at = self._last_active_reply_at.get(
+                    event.unified_msg_origin,
+                    0.0,
+                )
+                if now - last_reply_at < cfg["ar_cooldown_seconds"]:
+                    return False
+                should_reply = self._is_relevant_message(event, cfg)
+                if should_reply:
+                    self._last_active_reply_at[event.unified_msg_origin] = now
+                return should_reply
         return False
+
+    def _is_relevant_message(self, event: AstrMessageEvent, cfg: dict) -> bool:
+        text = event.message_str.strip()
+        if not text:
+            return False
+
+        keywords = {
+            str(keyword).strip().lower()
+            for keyword in cfg["ar_trigger_keywords"]
+            if str(keyword).strip()
+        }
+        if any(keyword in text.lower() for keyword in keywords):
+            return True
+
+        score = 0.0
+        if len(text) >= 4:
+            score += 0.1
+        if text.endswith(("?", "？")):
+            score += 0.35
+
+        records = list(self.raw_records.get(event.unified_msg_origin, deque()))
+        recent_records = records[-cfg["ar_context_messages"] :]
+        common_terms = _topic_terms(text).intersection(
+            _topic_terms("\n".join(recent_records))
+        )
+        if len(common_terms) >= 2:
+            score += 0.35
+        elif len(common_terms) == 1:
+            score += 0.2
+
+        return score >= float(cfg["ar_relevance_threshold"])
 
     async def remove_session(self, event: AstrMessageEvent) -> int:
         umo = event.unified_msg_origin
@@ -135,6 +194,7 @@ class GroupChatContext:
             self.raw_records.pop(umo, None)
             self._record_ids.pop(umo, None)
         self._locks.pop(umo, None)
+        self._last_active_reply_at.pop(umo, None)
         return cnt
 
     async def handle_message(self, event: AstrMessageEvent) -> None:
@@ -240,6 +300,30 @@ class GroupChatContext:
 
 
 _MAX_REPLY_TEXT_LENGTH = 200
+_TOPIC_TOKEN_RE = re.compile(r"[a-zA-Z0-9]+|[\u4e00-\u9fff]+")
+_COMMON_TOPIC_TERMS = {
+    "一个",
+    "不是",
+    "什么",
+    "可以",
+    "就是",
+    "怎么",
+    "这个",
+    "那个",
+}
+
+
+def _topic_terms(text: str) -> set[str]:
+    terms: set[str] = set()
+    for token in _TOPIC_TOKEN_RE.findall(text.lower()):
+        if token.isascii():
+            if len(token) >= 3:
+                terms.add(token)
+            continue
+        if len(token) == 1:
+            continue
+        terms.update(token[index : index + 2] for index in range(len(token) - 1))
+    return terms.difference(_COMMON_TOPIC_TERMS)
 
 
 def _describe_chain(chain: list) -> str:
@@ -285,6 +369,14 @@ def _positive_int(value, fallback: int) -> int:
     except (TypeError, ValueError):
         return fallback
     return parsed if parsed > 0 else fallback
+
+
+def _non_negative_float(value, fallback: float) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return fallback
+    return parsed if parsed >= 0 else fallback
 
 
 def _trim_left(

@@ -231,6 +231,10 @@ DEFAULT_CONFIG = {
             "method": "possibility_reply",
             "possibility_reply": 0.1,
             "whitelist": [],
+            "relevance_threshold": 0.55,
+            "cooldown_seconds": 120,
+            "context_messages": 12,
+            "trigger_keywords": [],
         },
     },
     "content_safety": {
@@ -2960,10 +2964,26 @@ CONFIG_METADATA_2 = {
                             },
                             "method": {
                                 "type": "string",
-                                "options": ["possibility_reply"],
+                                "options": [
+                                    "possibility_reply",
+                                    "relevance_reply",
+                                ],
                             },
                             "possibility_reply": {
                                 "type": "float",
+                            },
+                            "relevance_threshold": {
+                                "type": "float",
+                            },
+                            "cooldown_seconds": {
+                                "type": "float",
+                            },
+                            "context_messages": {
+                                "type": "int",
+                            },
+                            "trigger_keywords": {
+                                "type": "list",
+                                "items": {"type": "string"},
                             },
                         },
                     },
@@ -4198,7 +4218,8 @@ CONFIG_METADATA_3 = {
                     "provider_ltm_settings.active_reply.method": {
                         "description": "主动回复方法",
                         "type": "string",
-                        "options": ["possibility_reply"],
+                        "options": ["possibility_reply", "relevance_reply"],
+                        "labels": ["固定概率", "上下文相关度"],
                         "condition": {
                             "provider_ltm_settings.active_reply.enable": True,
                         },
@@ -4208,6 +4229,40 @@ CONFIG_METADATA_3 = {
                         "type": "float",
                         "hint": "0.0-1.0 之间的数值",
                         "slider": {"min": 0, "max": 1, "step": 0.05},
+                        "condition": {
+                            "provider_ltm_settings.active_reply.enable": True,
+                        },
+                    },
+                    "provider_ltm_settings.active_reply.relevance_threshold": {
+                        "description": "相关度阈值",
+                        "type": "float",
+                        "hint": "值越高越克制，推荐 0.55。",
+                        "slider": {"min": 0.1, "max": 1, "step": 0.05},
+                        "condition": {
+                            "provider_ltm_settings.active_reply.enable": True,
+                        },
+                    },
+                    "provider_ltm_settings.active_reply.cooldown_seconds": {
+                        "description": "主动回复冷却（秒）",
+                        "type": "float",
+                        "hint": "一次主动回复后保持沉默的时间。",
+                        "condition": {
+                            "provider_ltm_settings.active_reply.enable": True,
+                        },
+                    },
+                    "provider_ltm_settings.active_reply.context_messages": {
+                        "description": "相关度上下文消息数",
+                        "type": "int",
+                        "hint": "仅用于本地相关度判断，推荐 12。",
+                        "condition": {
+                            "provider_ltm_settings.active_reply.enable": True,
+                        },
+                    },
+                    "provider_ltm_settings.active_reply.trigger_keywords": {
+                        "description": "高相关触发词",
+                        "type": "list",
+                        "items": {"type": "string"},
+                        "hint": "出现机器人昵称等词时视为高相关。",
                         "condition": {
                             "provider_ltm_settings.active_reply.enable": True,
                         },
