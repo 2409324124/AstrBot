@@ -9,6 +9,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.message_components import Image, Plain
 from astrbot.api.provider import ProviderRequest
 from astrbot.core import logger
+from astrbot.core.star.filter.command import GreedyStr
 from astrbot.core.utils.session_waiter import (
     FILTERS,
     USER_SESSIONS,
@@ -163,6 +164,13 @@ class Main(star.Star):
                 logger.error(f"group chat context: {e}")
 
         if group_context_enabled and self.group_chat_context and has_image_or_plain:
+            suppress_reply = getattr(
+                self.group_chat_context, "should_suppress_group_bot_reply", None
+            )
+            if callable(suppress_reply) and suppress_reply(event):
+                event.stop_event()
+                return
+
             need_active = await self.group_chat_context.need_active_reply(event)
 
             group_icl_enable = self.context.get_config(umo=event.unified_msg_origin)[
@@ -177,6 +185,17 @@ class Main(star.Star):
                         await self.group_chat_context.handle_message(event)
                     except BaseException as e:
                         logger.error(e)
+
+            consume_handoff = getattr(
+                self.group_chat_context, "consume_human_handoff", None
+            )
+            handoff_instruction = (
+                consume_handoff(event) if callable(consume_handoff) else None
+            )
+            if handoff_instruction:
+                event.message_str = handoff_instruction
+                event.is_at_or_wake_command = True
+                event.is_wake = True
 
             if need_active:
                 provider = self.context.get_using_provider(event.unified_msg_origin)
@@ -221,6 +240,16 @@ class Main(star.Star):
                 except BaseException as e:
                     logger.error(traceback.format_exc())
                     logger.error(f"主动回复失败: {e}")
+
+    @filter.command("research", alias={"研究", "检索"})
+    async def research(self, event: AstrMessageEvent, query: GreedyStr):
+        """Run an LLM turn that must use external web search first."""
+        question = str(query).strip()
+        if not question:
+            yield event.plain_result("用法：/research 要研究的问题")
+            return
+        event.set_extra("_force_external_research", True)
+        yield event.request_llm(prompt=question, session_id=event.session_id)
 
     @filter.on_llm_request()
     async def decorate_llm_req(

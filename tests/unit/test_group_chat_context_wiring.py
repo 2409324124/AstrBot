@@ -167,3 +167,84 @@ async def test_on_message_skips_recording_when_command_handler_matched():
 
     main.group_chat_context.need_active_reply.assert_awaited_once_with(event)
     main.group_chat_context.handle_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_human_handoff_turns_shared_account_message_into_llm_request():
+    main = Main.__new__(Main)
+    main.context = MagicMock()
+    main.context.get_config.return_value = {
+        "provider_ltm_settings": {
+            "group_icl_enable": True,
+            "active_reply": {"enable": True},
+        },
+    }
+    handoff_instruction = "请接管并回答被引用的消息；需要外部事实时先检索。"
+    main.group_chat_context = SimpleNamespace(
+        need_active_reply=AsyncMock(return_value=False),
+        handle_message=AsyncMock(),
+        consume_human_handoff=MagicMock(return_value=handoff_instruction),
+    )
+    event = make_event()
+    event.is_at_or_wake_command = False
+    event.is_wake = False
+
+    async for _ in main.on_message(event):
+        pass
+
+    main.group_chat_context.consume_human_handoff.assert_called_once_with(event)
+    assert event.message_str == handoff_instruction
+    assert event.is_at_or_wake_command is True
+    assert event.is_wake is True
+
+
+@pytest.mark.asyncio
+async def test_member_group_mute_stops_the_event_before_any_bot_reply():
+    main = Main.__new__(Main)
+    main.context = MagicMock()
+    main.context.get_config.return_value = {
+        "provider_ltm_settings": {
+            "group_icl_enable": True,
+            "active_reply": {"enable": True},
+        },
+    }
+    main.group_chat_context = SimpleNamespace(
+        should_suppress_group_bot_reply=MagicMock(return_value=True),
+        need_active_reply=AsyncMock(),
+        handle_message=AsyncMock(),
+    )
+    event = make_event()
+
+    results = [item async for item in main.on_message(event)]
+
+    assert results == []
+    event.stop_event.assert_called_once_with()
+    main.group_chat_context.need_active_reply.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_research_command_requests_llm_with_external_research_flag():
+    main = Main.__new__(Main)
+    event = make_event()
+    event.request_llm.return_value = "research-request"
+
+    results = [item async for item in main.research(event, "贪心算法的反例")]
+
+    assert results == ["research-request"]
+    assert event.get_extra("_force_external_research") is True
+    event.request_llm.assert_called_once_with(
+        prompt="贪心算法的反例",
+        session_id="session-1",
+    )
+
+
+@pytest.mark.asyncio
+async def test_research_command_requires_a_question():
+    main = Main.__new__(Main)
+    event = make_event()
+    event.plain_result.return_value = "usage"
+
+    results = [item async for item in main.research(event, "")]
+
+    assert results == ["usage"]
+    event.request_llm.assert_not_called()

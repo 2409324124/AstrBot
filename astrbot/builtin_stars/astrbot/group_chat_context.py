@@ -1,5 +1,6 @@
 import asyncio
 import datetime
+import hashlib
 import random
 import re
 import time
@@ -48,6 +49,8 @@ class GroupChatContext:
         self.raw_records: dict[str, deque[str]] = defaultdict(deque)
         self._record_ids: dict[str, deque[str]] = defaultdict(deque)
         self._last_active_reply_at: dict[str, float] = {}
+        self._human_takeover_until: dict[str, float] = {}
+        self._member_mute_until: dict[str, float] = {}
 
     def _get_lock(self, umo: str) -> asyncio.Lock:
         lock = self._locks.get(umo)
@@ -99,6 +102,14 @@ class GroupChatContext:
                 active_reply.get("cooldown_seconds", 120),
                 120,
             ),
+            "ar_human_takeover_seconds": _non_negative_float(
+                active_reply.get("human_takeover_seconds", 900),
+                900,
+            ),
+            "ar_member_mute_seconds": _non_negative_float(
+                active_reply.get("member_mute_seconds", 1800),
+                1800,
+            ),
         }
 
     async def get_image_caption(
@@ -125,11 +136,28 @@ class GroupChatContext:
 
     async def need_active_reply(self, event: AstrMessageEvent) -> bool:
         cfg = self.cfg(event)
+        now = time.monotonic()
+        if _is_human_self_message(event):
+            self._human_takeover_until[event.unified_msg_origin] = (
+                now + cfg["ar_human_takeover_seconds"]
+            )
+            logger.info(
+                "human_takeover | event=started "
+                f"| scope_ref={_scope_ref(event.unified_msg_origin)} "
+                f"| seconds={cfg['ar_human_takeover_seconds']}"
+            )
+            return False
         if not cfg["enable_active_reply"]:
             return False
         if event.get_message_type() != MessageType.GROUP_MESSAGE:
             return False
         if event.is_at_or_wake_command:
+            return False
+        if _mentions_another_person(event):
+            return False
+        if now < self._human_takeover_until.get(event.unified_msg_origin, 0.0):
+            return False
+        if now < self._member_mute_until.get(event.unified_msg_origin, 0.0):
             return False
         if cfg["ar_whitelist"] and (
             event.unified_msg_origin not in cfg["ar_whitelist"]
@@ -142,7 +170,6 @@ class GroupChatContext:
             case "possibility_reply":
                 return random.random() < cfg["ar_possibility"]
             case "relevance_reply":
-                now = time.monotonic()
                 last_reply_at = self._last_active_reply_at.get(
                     event.unified_msg_origin,
                     0.0,
@@ -154,6 +181,43 @@ class GroupChatContext:
                     self._last_active_reply_at[event.unified_msg_origin] = now
                 return should_reply
         return False
+
+    def should_suppress_group_bot_reply(self, event: AstrMessageEvent) -> bool:
+        """Suppress replies during human takeover or a member-requested hush.
+
+        Both timers are deliberately in-memory and scoped to one UMO. Explicit
+        parsed commands remain available during a takeover. Group admins bypass
+        a member-requested hush, but not an active shared-account takeover.
+
+        Args:
+            event: Incoming AstrBot message event.
+
+        Returns:
+            Whether all normal bot reply paths should stop for this event.
+        """
+        if event.get_message_type() != MessageType.GROUP_MESSAGE:
+            return False
+        if _is_human_self_message(event):
+            return False
+
+        cfg = self.cfg(event)
+        now = time.monotonic()
+        umo = event.unified_msg_origin
+        if event.get_extra("handlers_parsed_params", {}):
+            return False
+        if now < self._human_takeover_until.get(umo, 0.0):
+            logger.info(
+                f"human_takeover | event=reply_suppressed | scope_ref={_scope_ref(umo)}"
+            )
+            return True
+        if _is_group_admin(event):
+            return False
+        if _MEMBER_HUSH_RE.search(event.message_str):
+            mute_seconds = cfg["ar_member_mute_seconds"]
+            if mute_seconds > 0:
+                self._member_mute_until[umo] = now + mute_seconds
+
+        return now < self._member_mute_until.get(umo, 0.0)
 
     def _is_relevant_message(self, event: AstrMessageEvent, cfg: dict) -> bool:
         text = event.message_str.strip()
@@ -186,6 +250,29 @@ class GroupChatContext:
 
         return score >= float(cfg["ar_relevance_threshold"])
 
+    def consume_human_handoff(self, event: AstrMessageEvent) -> str | None:
+        """Release takeover when the owner quotes a message and hands it off.
+
+        Args:
+            event: Incoming AstrBot message event.
+
+        Returns:
+            An LLM instruction for a valid handoff, otherwise ``None``.
+        """
+        if not _is_human_self_message(event):
+            return None
+        if not any(isinstance(component, Reply) for component in event.get_messages()):
+            return None
+        if not _HUMAN_HANDOFF_RE.fullmatch(event.message_str):
+            return None
+
+        self._human_takeover_until.pop(event.unified_msg_origin, None)
+        logger.info(
+            "human_takeover | event=handoff_accepted "
+            f"| scope_ref={_scope_ref(event.unified_msg_origin)}"
+        )
+        return "请接管并回答被引用的消息；需要外部事实时先检索。"
+
     async def remove_session(self, event: AstrMessageEvent) -> int:
         umo = event.unified_msg_origin
         lock = self._get_lock(umo)
@@ -195,6 +282,8 @@ class GroupChatContext:
             self._record_ids.pop(umo, None)
         self._locks.pop(umo, None)
         self._last_active_reply_at.pop(umo, None)
+        self._human_takeover_until.pop(umo, None)
+        self._member_mute_until.pop(umo, None)
         return cnt
 
     async def handle_message(self, event: AstrMessageEvent) -> None:
@@ -215,7 +304,10 @@ class GroupChatContext:
             event.set_extra("_group_context_record_id", record_id)
             event.set_extra("_group_context_raw_idx", len(records) - 1)
 
-        logger.debug(f"group_chat_context | {umo} | {final_message}")
+        logger.debug(
+            "group_chat_context | event=recorded "
+            f"| scope_ref={_scope_ref(umo)} | chars={len(final_message)}"
+        )
 
     async def on_req_llm(self, event: AstrMessageEvent, req: ProviderRequest) -> None:
         umo = event.unified_msg_origin
@@ -301,6 +393,14 @@ class GroupChatContext:
 
 _MAX_REPLY_TEXT_LENGTH = 200
 _TOPIC_TOKEN_RE = re.compile(r"[a-zA-Z0-9]+|[\u4e00-\u9fff]+")
+_HUMAN_HANDOFF_RE = re.compile(
+    r"\s*让\s*(?:bot|机器人)\s*回答(?:这个问题)?\s*[。！？!?]?\s*",
+    re.IGNORECASE,
+)
+_MEMBER_HUSH_RE = re.compile(
+    r"(?:这(?:个)?群.{0,8}(?:别|不要|不准|关闭|关掉).{0,5}(?:bot|机器人)|(?:别|不要|不准|关闭|关掉).{0,5}(?:bot|机器人))",
+    re.IGNORECASE,
+)
 _COMMON_TOPIC_TERMS = {
     "一个",
     "不是",
@@ -311,6 +411,43 @@ _COMMON_TOPIC_TERMS = {
     "这个",
     "那个",
 }
+
+
+def _is_human_self_message(event: AstrMessageEvent) -> bool:
+    raw_message = getattr(event.message_obj, "raw_message", None)
+    return isinstance(raw_message, dict) and (
+        raw_message.get("_astrbot_self_message_source") == "human"
+    )
+
+
+def _scope_ref(umo: str) -> str:
+    """Create a non-reversible short reference for audit logs.
+
+    Args:
+        umo: Unified message origin containing the platform and session scope.
+
+    Returns:
+        A truncated SHA-256 digest suitable for correlating audit events.
+    """
+    return hashlib.sha256(umo.encode()).hexdigest()[:12]
+
+
+def _is_group_admin(event: AstrMessageEvent) -> bool:
+    raw_message = getattr(event.message_obj, "raw_message", None)
+    if not isinstance(raw_message, dict):
+        return False
+    sender = raw_message.get("sender")
+    if not isinstance(sender, dict):
+        return False
+    return str(sender.get("role", "")).lower() in {"admin", "owner"}
+
+
+def _mentions_another_person(event: AstrMessageEvent) -> bool:
+    self_id = str(event.get_self_id())
+    for component in event.get_messages():
+        if isinstance(component, At) and str(component.qq) not in {self_id, "all"}:
+            return True
+    return False
 
 
 def _topic_terms(text: str) -> set[str]:

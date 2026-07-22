@@ -85,12 +85,16 @@ class WakingCheckStage(Stage):
                 event.session_id = sid
 
         # ignore bot self message
-        if (
-            self.ignore_bot_self_message
-            and event.get_self_id() == event.get_sender_id()
+        if self.ignore_bot_self_message and (
+            event.get_self_id() == event.get_sender_id()
         ):
-            event.stop_event()
-            return
+            raw_message = getattr(event.message_obj, "raw_message", None)
+            is_manual_owner_message = isinstance(raw_message, dict) and (
+                raw_message.get("_astrbot_self_message_source") == "human"
+            )
+            if not is_manual_owner_message:
+                event.stop_event()
+                return
 
         # 设置 sender 身份
         event.message_str = event.message_str.strip()

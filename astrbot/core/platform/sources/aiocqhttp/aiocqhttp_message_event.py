@@ -1,5 +1,8 @@
 import asyncio
+import json
 import re
+import time
+from collections import deque
 from collections.abc import AsyncGenerator
 
 from aiocqhttp import CQHttp, Event
@@ -17,6 +20,80 @@ from astrbot.api.message_components import (
     Video,
 )
 from astrbot.api.platform import Group, MessageMember
+
+
+class OutboundMessageTracker:
+    """Remember recent AstrBot sends so self-message events do not loop back."""
+
+    def __init__(self) -> None:
+        self._message_ids: dict[str, float] = {}
+        self._pending_fingerprints: deque[tuple[str, float]] = deque()
+
+    def remember_pending(self, message: list[dict]) -> None:
+        self._prune()
+        self._pending_fingerprints.append(
+            (_message_fingerprint(message), time.monotonic() + 30)
+        )
+
+    def remember_sent_message_id(self, message_id: object) -> None:
+        if message_id is None:
+            return
+        self._prune()
+        self._message_ids[str(message_id)] = time.monotonic() + 30
+
+    def discard_pending(self, message: list[dict]) -> None:
+        """Forget one pending send after the corresponding action failed.
+
+        Args:
+            message: OneBot message segments from the failed send action.
+        """
+        self._prune()
+        fingerprint = _message_fingerprint(message)
+        for index, (pending, _) in enumerate(self._pending_fingerprints):
+            if pending == fingerprint:
+                del self._pending_fingerprints[index]
+                break
+
+    def consume_if_bot_message(self, event: dict) -> bool:
+        self._prune()
+        message_id = event.get("message_id")
+        matched_message_id = bool(
+            message_id is not None and self._message_ids.pop(str(message_id), None)
+        )
+
+        fingerprint = _message_fingerprint(event.get("message", []))
+        matched_fingerprint = False
+        for index, (pending, _) in enumerate(self._pending_fingerprints):
+            if pending == fingerprint:
+                del self._pending_fingerprints[index]
+                matched_fingerprint = True
+                break
+        return matched_message_id or matched_fingerprint
+
+    def _prune(self) -> None:
+        now = time.monotonic()
+        self._message_ids = {
+            message_id: expires_at
+            for message_id, expires_at in self._message_ids.items()
+            if expires_at > now
+        }
+        while self._pending_fingerprints and self._pending_fingerprints[0][1] <= now:
+            self._pending_fingerprints.popleft()
+
+
+def _message_fingerprint(message: object) -> str:
+    return json.dumps(
+        message, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
+
+
+def get_outbound_message_tracker(bot: CQHttp) -> OutboundMessageTracker:
+    tracker = getattr(bot, "_astrbot_outbound_message_tracker", None)
+    if isinstance(tracker, OutboundMessageTracker):
+        return tracker
+    tracker = OutboundMessageTracker()
+    setattr(bot, "_astrbot_outbound_message_tracker", tracker)
+    return tracker
 
 
 class AiocqhttpMessageEvent(AstrMessageEvent):
@@ -103,24 +180,32 @@ class AiocqhttpMessageEvent(AstrMessageEvent):
         if isinstance(event, Event) and event.get("self_id"):
             routing_params["self_id"] = event["self_id"]
 
-        if is_group and isinstance(session_id_int, int):
-            await bot.send_group_msg(
-                group_id=session_id_int,
-                message=messages,
-                **routing_params,
-            )
-        elif not is_group and isinstance(session_id_int, int):
-            await bot.send_private_msg(
-                user_id=session_id_int,
-                message=messages,
-                **routing_params,
-            )
-        elif isinstance(event, Event):  # 最后兜底
-            await bot.send(event=event, message=messages)
-        else:
-            raise ValueError(
-                f"无法发送消息：缺少有效的数字 session_id({session_id}) 或 event({event})",
-            )
+        tracker = get_outbound_message_tracker(bot)
+        tracker.remember_pending(messages)
+        try:
+            if is_group and isinstance(session_id_int, int):
+                result = await bot.send_group_msg(
+                    group_id=session_id_int,
+                    message=messages,
+                    **routing_params,
+                )
+            elif not is_group and isinstance(session_id_int, int):
+                result = await bot.send_private_msg(
+                    user_id=session_id_int,
+                    message=messages,
+                    **routing_params,
+                )
+            elif isinstance(event, Event):  # 最后兜底
+                result = await bot.send(event=event, message=messages)
+            else:
+                raise ValueError(
+                    f"无法发送消息：缺少有效的数字 session_id({session_id}) 或 event({event})",
+                )
+        except Exception:
+            tracker.discard_pending(messages)
+            raise
+        if isinstance(result, dict):
+            tracker.remember_sent_message_id(result.get("message_id"))
 
     @classmethod
     async def send_message(

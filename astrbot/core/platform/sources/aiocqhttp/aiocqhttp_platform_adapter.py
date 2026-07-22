@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import inspect
 import itertools
 import logging
@@ -129,7 +130,15 @@ class AiocqhttpAdapter(Platform):
         logger.debug(f"[aiocqhttp] RawMessage {event}")
 
         if event["post_type"] == "message":
-            abm = await self._convert_handle_message_event(event)
+            is_self_group_message = event.get("message_type") == "group" and str(
+                event.get("user_id", "")
+            ) == str(event.get("self_id", ""))
+            if is_self_group_message:
+                abm = await self.convert_manual_self_message_sent(event)
+                if abm is None:
+                    return None
+            else:
+                abm = await self._convert_handle_message_event(event)
             if abm.sender.user_id == "2854196310":
                 # 屏蔽 QQ 管家的消息
                 return None
@@ -139,6 +148,36 @@ class AiocqhttpAdapter(Platform):
             abm = await self._convert_handle_request_event(event)
 
         return abm
+
+    async def convert_manual_self_message_sent(
+        self, event: Event
+    ) -> AstrBotMessage | None:
+        """Convert a non-AstrBot self-send event into a human group message.
+
+        Args:
+            event: OneBot group message sent by the connected QQ account.
+
+        Returns:
+            The converted owner message, or ``None`` for an AstrBot send loop.
+        """
+        if get_outbound_message_tracker(self.bot).consume_if_bot_message(event):
+            return None
+
+        if not event.get("sender"):
+            event["sender"] = {
+                "user_id": event.get("user_id", event.get("self_id", "")),
+                "nickname": str(event.get("self_id", "")),
+                "card": "",
+            }
+        event["_astrbot_self_message_source"] = "human"
+        group_ref = hashlib.sha256(str(event.get("group_id", "")).encode()).hexdigest()[
+            :12
+        ]
+        logger.info(
+            "human_takeover | event=manual_self_message_detected "
+            f"| group_ref={group_ref}"
+        )
+        return await self._convert_handle_message_event(event)
 
     async def _convert_handle_request_event(self, event: Event) -> AstrBotMessage:
         """OneBot V11 请求类事件"""
