@@ -117,6 +117,9 @@ DEFAULT_CONFIG = {
         "websearch_firecrawl_key": [],
         "websearch_exa_key": [],
         "web_search_link": False,
+        "verified_factual_reply_policy": False,
+        "intent_router_enabled": False,
+        "intent_router_provider_id": "",
         "display_reasoning_text": False,
         "identifier": False,
         "group_name_display": False,
@@ -235,6 +238,8 @@ DEFAULT_CONFIG = {
             "cooldown_seconds": 120,
             "context_messages": 12,
             "trigger_keywords": [],
+            "human_takeover_seconds": 900,
+            "member_mute_seconds": 1800,
         },
     },
     "content_safety": {
@@ -2816,6 +2821,15 @@ CONFIG_METADATA_2 = {
                     "web_search_link": {
                         "type": "bool",
                     },
+                    "verified_factual_reply_policy": {
+                        "type": "bool",
+                    },
+                    "intent_router_enabled": {
+                        "type": "bool",
+                    },
+                    "intent_router_provider_id": {
+                        "type": "string",
+                    },
                     "display_reasoning_text": {
                         "type": "bool",
                     },
@@ -2984,6 +2998,12 @@ CONFIG_METADATA_2 = {
                             "trigger_keywords": {
                                 "type": "list",
                                 "items": {"type": "string"},
+                            },
+                            "human_takeover_seconds": {
+                                "type": "float",
+                            },
+                            "member_mute_seconds": {
+                                "type": "float",
                             },
                         },
                     },
@@ -3374,6 +3394,32 @@ CONFIG_METADATA_3 = {
                         "type": "bool",
                         "condition": {
                             "provider_settings.web_search": True,
+                        },
+                    },
+                    "provider_settings.verified_factual_reply_policy": {
+                        "description": "严格事实核验回复",
+                        "type": "bool",
+                        "hint": "外部事实会由 Exa 预检索；没有可信来源时不作答，并在回复末尾标明 AI 生成。",
+                        "condition": {
+                            "provider_settings.web_search": True,
+                            "provider_settings.websearch_provider": "exa",
+                        },
+                    },
+                    "provider_settings.intent_router_enabled": {
+                        "description": "启用结构化意图路由",
+                        "type": "bool",
+                        "hint": "用隔离的 LLM JSON 分类区分本地系统、技术解释、外部事实与聊天；不使用关键词决定意图。",
+                        "condition": {
+                            "provider_settings.verified_factual_reply_policy": True,
+                        },
+                    },
+                    "provider_settings.intent_router_provider_id": {
+                        "description": "意图路由模型 ID（留空复用当前模型）",
+                        "type": "string",
+                        "hint": "可指定低成本、稳定的聊天模型；该调用不带会话上下文或工具。",
+                        "condition": {
+                            "provider_settings.verified_factual_reply_policy": True,
+                            "provider_settings.intent_router_enabled": True,
                         },
                     },
                 },

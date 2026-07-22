@@ -1,0 +1,48 @@
+services:
+  astrbot:
+    # The current upstream image's Python interpreter cannot exec under this
+    # kernel/runtime combination when no-new-privileges is set. Keep the change
+    # scoped to this local RAG deployment rather than editing compose.yml.
+    security_opt: !reset []
+    image: ${ASTRBOT_RAG_IMAGE:-astrbot-local-rag:4.26.5}
+    build:
+      context: ${ASTRBOT_SOURCE_ROOT:-/home/miku/astrbot-deploy/AstrBot}
+      dockerfile: rag-stack/Dockerfile.astrbot
+      network: host
+      args:
+        ASTRBOT_BASE_IMAGE: ${ASTRBOT_BASE_IMAGE:-soulter/astrbot:latest}
+        HTTPS_PROXY: ${RAG_BUILD_PROXY:-}
+        HTTP_PROXY: ${RAG_BUILD_PROXY:-}
+    environment:
+      ASTRBOT_VECTOR_DB: ${ASTRBOT_VECTOR_DB:-faiss}
+      ASTRBOT_QDRANT_URL: ${ASTRBOT_QDRANT_URL:-http://qdrant:6333}
+      ASTRBOT_QDRANT_API_KEY: ${QDRANT_API_KEY:?QDRANT_API_KEY is required}
+      ASTRBOT_QDRANT_COLLECTION_PREFIX: ${ASTRBOT_QDRANT_COLLECTION_PREFIX:-astrbot_kb_}
+      ASTRBOT_KB_ROOT: /AstrBot/data/knowledge_base
+      ASTRBOT_DASHBOARD_URL: http://127.0.0.1:6185/api/v1
+      ASTRBOT_DASHBOARD_USERNAME: ${ASTRBOT_DASHBOARD_USERNAME:?ASTRBOT_DASHBOARD_USERNAME is required}
+      ASTRBOT_DASHBOARD_PASSWORD: ${ASTRBOT_DASHBOARD_PASSWORD:?ASTRBOT_DASHBOARD_PASSWORD is required}
+      ASTRBOT_EMBEDDING_PROVIDER_ID: ${ASTRBOT_EMBEDDING_PROVIDER_ID:-local_bge_m3}
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:?EMBEDDING_API_KEY is required}
+      EMBEDDING_BASE_URL: ${EMBEDDING_DOCKER_BASE_URL:-http://embedding-server:8000/v1}
+      EMBEDDING_DOCKER_BASE_URL: ${EMBEDDING_DOCKER_BASE_URL:-http://embedding-server:8000/v1}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-BAAI/bge-m3}
+      EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-1024}
+      EMBEDDING_BATCH_SIZE: ${EMBEDDING_BATCH_SIZE:-32}
+      ASTRBOT_WEBSEARCH_EXA_KEY: ${ASTRBOT_WEBSEARCH_EXA_KEY:-}
+      QDRANT_API_KEY: ${QDRANT_API_KEY:?QDRANT_API_KEY is required}
+      QDRANT_HOST_URL: ${ASTRBOT_QDRANT_URL:-http://qdrant:6333}
+      RAG_DATA_ROOT: /rag-data
+    volumes:
+      # The base image does not contain this fork's source tree. Keep runtime
+      # code aligned with the checked-out branch while compose.yml retains its
+      # more-specific /AstrBot/data mount for persistent state.
+      - ${ASTRBOT_SOURCE_ROOT:-/home/miku/astrbot-deploy/AstrBot}:/AstrBot
+      - ${RAG_DATA_ROOT:?RAG_DATA_ROOT is required}:/rag-data
+    networks:
+      - default
+      - astrbot-rag
+
+networks:
+  astrbot-rag:
+    external: true

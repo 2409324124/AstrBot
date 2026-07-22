@@ -11,6 +11,8 @@ from astrbot.core.agent.mcp_client import MCPTool
 from astrbot.core.agent.message import Message, dump_messages_with_checkpoints
 from astrbot.core.agent.tool import FunctionTool, ToolSet
 from astrbot.core.conversation_mgr import Conversation
+from astrbot.core.intent_router import IntentDecision, IntentRoute
+from astrbot.core.local_evidence import LorebookEntry
 from astrbot.core.message.components import File, Image, Plain, Reply, Video
 from astrbot.core.platform.astr_message_event import AstrMessageEvent
 from astrbot.core.platform.platform_metadata import PlatformMetadata
@@ -167,6 +169,281 @@ def test_append_system_reminders_includes_weekday(mock_event):
         "<system_reminder>Current datetime: "
         "2026-06-08 12:34 (UTC), Weekday: Monday</system_reminder>"
     ]
+
+
+@pytest.mark.asyncio
+async def test_verified_factual_reply_policy_preloads_only_trusted_exa_evidence(
+    monkeypatch,
+):
+    event = MagicMock()
+    event.unified_msg_origin = "test:private:1"
+    req = ProviderRequest(prompt="2026年这个事件发生在什么地方？")
+    req.system_prompt = "base prompt"
+    context = MagicMock()
+    context.get_config.return_value = {
+        "provider_settings": {
+            "verified_factual_reply_policy": True,
+            "intent_router_enabled": True,
+            "web_search": True,
+            "websearch_provider": "exa",
+        }
+    }
+    provider = MagicMock(spec=Provider)
+
+    async def fake_collect(provider_settings, query):
+        assert query == req.prompt
+        return (
+            [
+                {
+                    "title": "Reuters report",
+                    "url": "https://www.reuters.com/world/example",
+                    "snippet": "verified report",
+                }
+            ],
+            [{"title": "X lead", "url": "https://x.com/example/1", "snippet": ""}],
+        )
+
+    monkeypatch.setattr(ama, "collect_exa_factual_evidence", fake_collect)
+    monkeypatch.setattr(
+        ama,
+        "classify_intent",
+        AsyncMock(
+            return_value=IntentDecision(IntentRoute.EXTERNAL_FACT, confidence=0.99)
+        ),
+    )
+
+    await ama._apply_verified_factual_reply_policy(event, req, context, provider)
+
+    event.set_extra.assert_any_call("_verified_reply_policy_enabled", True)
+    event.set_extra.assert_any_call("_factual_guard_required", True)
+    event.set_extra.assert_any_call(
+        "_factual_trusted_sources",
+        [
+            {
+                "title": "Reuters report",
+                "url": "https://www.reuters.com/world/example",
+                "snippet": "verified report",
+            }
+        ],
+    )
+    assert "verified_web_evidence" in req.extra_user_content_parts[-1].text
+    assert (
+        "https://www.reuters.com/world/example" in req.extra_user_content_parts[-1].text
+    )
+
+
+@pytest.mark.asyncio
+async def test_verified_reply_policy_uses_llm_local_route_and_skips_exa(
+    monkeypatch,
+):
+    event = MagicMock()
+    event.unified_msg_origin = "test:private:1"
+    req = ProviderRequest(prompt="这个知识库是否使用 BM25 的向量检索？")
+    context = MagicMock()
+    context.get_config.return_value = {
+        "provider_settings": {
+            "verified_factual_reply_policy": True,
+            "intent_router_enabled": True,
+            "web_search": True,
+            "websearch_provider": "exa",
+        }
+    }
+    provider = MagicMock(spec=Provider)
+
+    async def fake_classify(router_provider, prompt):
+        assert router_provider is provider
+        assert prompt == req.prompt
+        return IntentDecision(IntentRoute.LOCAL_SYSTEM, confidence=0.98)
+
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("local system route must not call Exa")
+
+    monkeypatch.setattr(ama, "classify_intent", fake_classify)
+    monkeypatch.setattr(
+        ama,
+        "load_lorebook",
+        lambda: (
+            LorebookEntry(
+                entry_id="bm25",
+                aliases=("BM25",),
+                source_type="local_rag",
+                content="本地检索包含 BM25 稀疏检索、稠密向量检索与 RRF 融合。",
+            ),
+        ),
+    )
+    monkeypatch.setattr(ama, "collect_exa_factual_evidence", fail_if_called)
+
+    await ama._apply_verified_factual_reply_policy(event, req, context, provider)
+
+    event.set_extra.assert_any_call("_intent_route", "local_system")
+    assert "local_evidence" in req.extra_user_content_parts[-1].text
+    assert "BM25 稀疏检索" in req.extra_user_content_parts[-1].text
+    assert "runtime-provider-settings" in req.extra_user_content_parts[-1].text
+    assert '"web_search_enabled": true' in req.extra_user_content_parts[-1].text
+
+
+@pytest.mark.asyncio
+async def test_verified_reply_policy_keeps_chat_route_out_of_factual_guard(
+    monkeypatch,
+):
+    event = MagicMock()
+    event.unified_msg_origin = "test:private:1"
+    req = ProviderRequest(prompt="你是谁？")
+    context = MagicMock()
+    context.get_config.return_value = {
+        "provider_settings": {
+            "verified_factual_reply_policy": True,
+            "intent_router_enabled": True,
+            "web_search": True,
+            "websearch_provider": "exa",
+        }
+    }
+    provider = MagicMock(spec=Provider)
+
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("chat route must not call Exa")
+
+    monkeypatch.setattr(
+        ama,
+        "classify_intent",
+        AsyncMock(
+            return_value=IntentDecision(IntentRoute.CHAT_CREATIVE, confidence=0.99)
+        ),
+    )
+    monkeypatch.setattr(ama, "collect_exa_factual_evidence", fail_if_called)
+
+    await ama._apply_verified_factual_reply_policy(event, req, context, provider)
+
+    event.set_extra.assert_any_call("_intent_route", "chat_creative")
+    assert not any(
+        call.args and call.args[0] == "_factual_guard_required"
+        for call in event.set_extra.call_args_list
+    )
+    assert req.extra_user_content_parts == []
+
+
+@pytest.mark.asyncio
+async def test_local_route_gets_runtime_config_even_without_lorebook_match(monkeypatch):
+    event = MagicMock()
+    event.unified_msg_origin = "test:private:1"
+    req = ProviderRequest(prompt="你这边当前有没有开启外部搜索？")
+    context = MagicMock()
+    context.get_config.return_value = {
+        "provider_settings": {
+            "verified_factual_reply_policy": True,
+            "intent_router_enabled": True,
+            "web_search": True,
+            "websearch_provider": "exa",
+            "websearch_exa_key": ["must-not-leak"],
+        }
+    }
+    provider = MagicMock(spec=Provider)
+    monkeypatch.setattr(
+        ama,
+        "classify_intent",
+        AsyncMock(
+            return_value=IntentDecision(IntentRoute.LOCAL_SYSTEM, confidence=0.99)
+        ),
+    )
+    monkeypatch.setattr(ama, "load_lorebook", lambda: ())
+
+    await ama._apply_verified_factual_reply_policy(event, req, context, provider)
+
+    evidence = req.extra_user_content_parts[-1].text
+    assert "runtime-provider-settings" in evidence
+    assert '"web_search_enabled": true' in evidence
+    assert '"web_search_provider": "exa"' in evidence
+    assert "must-not-leak" not in evidence
+
+
+@pytest.mark.asyncio
+async def test_technical_route_does_not_receive_unrelated_runtime_config(monkeypatch):
+    event = MagicMock()
+    event.unified_msg_origin = "test:private:1"
+    req = ProviderRequest(prompt="解释倒排索引的原理")
+    context = MagicMock()
+    context.get_config.return_value = {
+        "provider_settings": {
+            "verified_factual_reply_policy": True,
+            "intent_router_enabled": True,
+            "web_search": True,
+            "websearch_provider": "exa",
+        }
+    }
+    provider = MagicMock(spec=Provider)
+    monkeypatch.setattr(
+        ama,
+        "classify_intent",
+        AsyncMock(
+            return_value=IntentDecision(
+                IntentRoute.TECHNICAL_CONCEPT,
+                confidence=0.99,
+            )
+        ),
+    )
+    monkeypatch.setattr(ama, "load_lorebook", lambda: ())
+
+    await ama._apply_verified_factual_reply_policy(event, req, context, provider)
+
+    assert req.extra_user_content_parts == []
+
+
+@pytest.mark.asyncio
+async def test_local_evidence_scans_only_five_most_recent_user_messages(monkeypatch):
+    event = MagicMock()
+    event.unified_msg_origin = "test:private:1"
+    req = ProviderRequest(
+        prompt="那这个呢？",
+        contexts=[
+            {"role": "user", "content": "NapCat"},
+            {"role": "assistant", "content": "旧回复"},
+            {"role": "user", "content": "普通消息一"},
+            {"role": "user", "content": "普通消息二"},
+            {"role": "user", "content": "普通消息三"},
+            {"role": "user", "content": "BM25"},
+        ],
+    )
+    context = MagicMock()
+    context.get_config.return_value = {
+        "provider_settings": {
+            "verified_factual_reply_policy": True,
+            "intent_router_enabled": True,
+            "web_search": True,
+            "websearch_provider": "exa",
+        }
+    }
+    provider = MagicMock(spec=Provider)
+    monkeypatch.setattr(
+        ama,
+        "classify_intent",
+        AsyncMock(
+            return_value=IntentDecision(IntentRoute.LOCAL_SYSTEM, confidence=0.99)
+        ),
+    )
+    monkeypatch.setattr(
+        ama,
+        "load_lorebook",
+        lambda: (
+            LorebookEntry(
+                entry_id="bm25",
+                aliases=("BM25",),
+                source_type="local_rag",
+                content="BM25 evidence",
+            ),
+            LorebookEntry(
+                entry_id="deployment",
+                aliases=("NapCat",),
+                source_type="local_config",
+                content="NapCat evidence",
+            ),
+        ),
+    )
+
+    await ama._apply_verified_factual_reply_policy(event, req, context, provider)
+
+    evidence = req.extra_user_content_parts[-1].text
+    assert "BM25 evidence" in evidence
+    assert "NapCat evidence" not in evidence
 
 
 class TestMainAgentBuildConfig:
@@ -521,6 +798,30 @@ class TestBuiltinToolInjection:
         assert req.func_tool.get_tool("web_search_firecrawl") is search_tool
         assert req.func_tool.get_tool("firecrawl_extract_web_page") is extract_tool
 
+    @pytest.mark.asyncio
+    async def test_apply_web_search_tools_skips_chat_route_under_verified_policy(
+        self, mock_event, mock_context
+    ):
+        req = ProviderRequest()
+        mock_context.get_config.return_value = {
+            "provider_settings": {
+                "web_search": True,
+                "websearch_provider": "exa",
+                "verified_factual_reply_policy": True,
+                "intent_router_enabled": True,
+            }
+        }
+        mock_event.get_extra.side_effect = lambda key, default=None: (
+            "chat_creative" if key == "_intent_route" else default
+        )
+        tool_mgr = MagicMock()
+        mock_context.get_llm_tool_manager.return_value = tool_mgr
+
+        await ama._apply_web_search_tools(mock_event, req, mock_context)
+
+        assert req.func_tool is None
+        tool_mgr.get_builtin_tool.assert_not_called()
+
     def test_apply_web_search_citation_prompt_for_webchat(self, mock_event):
         module = ama
         req = ProviderRequest(system_prompt="base")
@@ -548,7 +849,7 @@ class TestBuiltinToolInjection:
 
         assert req.system_prompt.count(module.WEB_SEARCH_CITATION_PROMPT) == 1
 
-    def test_apply_web_search_citation_prompt_requires_webchat(self, mock_event):
+    def test_apply_web_search_link_prompt_for_non_webchat(self, mock_event):
         module = ama
         req = ProviderRequest(system_prompt="")
         search_tool = MagicMock(spec=FunctionTool)
@@ -560,6 +861,47 @@ class TestBuiltinToolInjection:
         module._apply_web_search_citation_prompt(mock_event, req)
 
         assert module.WEB_SEARCH_CITATION_PROMPT not in req.system_prompt
+        assert module.WEB_SEARCH_LINK_PROMPT in req.system_prompt
+
+    def test_apply_web_search_link_prompt_is_idempotent(self, mock_event):
+        module = ama
+        req = ProviderRequest(system_prompt="")
+        search_tool = MagicMock(spec=FunctionTool)
+        search_tool.name = "web_search_exa"
+        req.func_tool = ToolSet()
+        req.func_tool.add_tool(search_tool)
+        mock_event.get_platform_name.return_value = "aiocqhttp"
+
+        module._apply_web_search_citation_prompt(mock_event, req)
+        module._apply_web_search_citation_prompt(mock_event, req)
+
+        assert req.system_prompt.count(module.WEB_SEARCH_LINK_PROMPT) == 1
+
+    def test_force_external_research_requires_web_search_before_answer(
+        self,
+        mock_event,
+    ):
+        module = ama
+        req = ProviderRequest(system_prompt="base")
+        mock_event.get_extra.side_effect = lambda key, default=None: (
+            True if key == "_force_external_research" else default
+        )
+
+        module._apply_forced_web_search_prompt(mock_event, req)
+
+        assert module.FORCED_WEB_RESEARCH_PROMPT in req.system_prompt
+
+    def test_force_external_research_prompt_is_idempotent(self, mock_event):
+        module = ama
+        req = ProviderRequest(system_prompt="")
+        mock_event.get_extra.side_effect = lambda key, default=None: (
+            True if key == "_force_external_research" else default
+        )
+
+        module._apply_forced_web_search_prompt(mock_event, req)
+        module._apply_forced_web_search_prompt(mock_event, req)
+
+        assert req.system_prompt.count(module.FORCED_WEB_RESEARCH_PROMPT) == 1
 
     def test_proactive_cron_job_tools_uses_builtin_tool_manager(self, mock_context):
         """Test cron tool injection through the builtin tool manager."""
@@ -1039,6 +1381,10 @@ class TestEnsurePersonaAndSkills:
         with (
             patch("astrbot.core.astr_main_agent.AgentRunner") as mock_runner_cls,
             patch("astrbot.core.astr_main_agent.AstrAgentContext"),
+            patch(
+                "astrbot.core.astr_main_agent.retrieve_knowledge_base",
+                new=AsyncMock(return_value=None),
+            ),
         ):
             mock_runner = MagicMock()
             mock_runner.reset = AsyncMock()
@@ -1081,6 +1427,10 @@ class TestEnsurePersonaAndSkills:
         with (
             patch("astrbot.core.astr_main_agent.AgentRunner") as mock_runner_cls,
             patch("astrbot.core.astr_main_agent.AstrAgentContext"),
+            patch(
+                "astrbot.core.astr_main_agent.retrieve_knowledge_base",
+                new=AsyncMock(return_value=None),
+            ),
         ):
             mock_runner = MagicMock()
             mock_runner.reset = AsyncMock()
@@ -1315,6 +1665,15 @@ class TestPluginToolFix:
 
 class TestBuildMainAgent:
     """Tests for build_main_agent function."""
+
+    @pytest.fixture(autouse=True)
+    def isolate_runtime_knowledge_base(self):
+        """Keep agent construction tests independent of global session storage."""
+        with patch(
+            "astrbot.core.astr_main_agent.retrieve_knowledge_base",
+            new=AsyncMock(return_value=None),
+        ):
+            yield
 
     @pytest.mark.asyncio
     async def test_build_main_agent_basic(
@@ -1997,7 +2356,7 @@ class TestBuildMainAgent:
         """Test building main agent with existing ProviderRequest."""
         module = ama
         existing_req = ProviderRequest(prompt="Existing prompt")
-        mock_event.get_extra.side_effect = lambda k: (
+        mock_event.get_extra.side_effect = lambda k, default=None: (
             existing_req if k == "provider_request" else None
         )
 

@@ -6,6 +6,65 @@ import pytest
 from astrbot.core.tools import web_search_tools as tools
 
 
+@pytest.mark.asyncio
+async def test_collect_exa_factual_evidence_collects_web_and_x_but_trusts_only_verified_domains(
+    monkeypatch,
+):
+    payloads = []
+
+    async def fake_exa_search(provider_settings, payload):
+        payloads.append(payload)
+        if payload.get("includeDomains") == ["x.com", "twitter.com"]:
+            return [
+                tools.SearchResult(
+                    title="Unverified X post",
+                    url="https://x.com/example/status/1",
+                    snippet="lead only",
+                )
+            ]
+        return [
+            tools.SearchResult(
+                title="Reuters report",
+                url="https://www.reuters.com/world/example",
+                snippet="verified report",
+            ),
+            tools.SearchResult(
+                title="Random blog",
+                url="https://example.invalid/post",
+                snippet="not trusted",
+            ),
+        ]
+
+    monkeypatch.setattr(tools, "_exa_search", fake_exa_search)
+
+    trusted, social = await tools.collect_exa_factual_evidence(
+        {"websearch_exa_key": ["test-key"]},
+        "current event",
+    )
+
+    assert trusted == [
+        {
+            "title": "Reuters report",
+            "url": "https://www.reuters.com/world/example",
+            "snippet": "verified report",
+        }
+    ]
+    assert social == [
+        {
+            "title": "Unverified X post",
+            "url": "https://x.com/example/status/1",
+            "snippet": "lead only",
+        }
+    ]
+    assert len(payloads) == 2
+    x_payload = next(
+        payload
+        for payload in payloads
+        if payload.get("includeDomains") == ["x.com", "twitter.com"]
+    )
+    assert "category" not in x_payload
+
+
 class _FakeConfig(dict):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -462,7 +521,11 @@ async def test_tavily_search_key_failover_on_quota_exceeded_432(
                 status=200,
                 jsonData={
                     "results": [
-                        {"title": "AstrBot", "url": "https://example.com", "content": "OK"}
+                        {
+                            "title": "AstrBot",
+                            "url": "https://example.com",
+                            "content": "OK",
+                        }
                     ]
                 },
             ),
@@ -500,7 +563,11 @@ async def test_tavily_search_key_failover_on_rate_limited_429(
                 status=200,
                 jsonData={
                     "results": [
-                        {"title": "RateLimitOK", "url": "https://example2.com", "content": "OK"}
+                        {
+                            "title": "RateLimitOK",
+                            "url": "https://example2.com",
+                            "content": "OK",
+                        }
                     ]
                 },
             ),
@@ -619,6 +686,28 @@ def test_normalize_legacy_web_search_config_migrates_exa_key():
     assert config.saved is True
 
 
+def test_get_runtime_uses_exa_key_from_environment_when_config_is_empty(monkeypatch):
+    monkeypatch.setenv("ASTRBOT_WEBSEARCH_EXA_KEY", "env-key-a, env-key-b\n")
+
+    _, provider_settings, _ = tools._get_runtime(
+        _context_with_provider_settings({"websearch_exa_key": []})
+    )
+
+    assert provider_settings["websearch_exa_key"] == ["env-key-a", "env-key-b"]
+
+
+def test_get_runtime_prefers_configured_exa_keys_over_environment(monkeypatch):
+    monkeypatch.setenv("ASTRBOT_WEBSEARCH_EXA_KEY", "env-key")
+    configured = {"websearch_exa_key": ["configured-key"]}
+
+    _, provider_settings, _ = tools._get_runtime(
+        _context_with_provider_settings(configured)
+    )
+
+    assert provider_settings is configured
+    assert provider_settings["websearch_exa_key"] == ["configured-key"]
+
+
 @pytest.mark.asyncio
 async def test_exa_search_maps_results(monkeypatch):
     async def fake_exa_search(provider_settings, payload):
@@ -643,6 +732,28 @@ async def test_exa_search_maps_results(monkeypatch):
     assert parsed["results"][0]["title"] == "AstrBot"
     assert parsed["results"][0]["url"] == "https://example.com"
     assert parsed["results"][0]["snippet"] == "AI Agent Assistant"
+
+
+@pytest.mark.asyncio
+async def test_exa_search_maps_legacy_tweet_category_to_x_domain_filter(monkeypatch):
+    async def fake_exa_search(provider_settings, payload):
+        assert "category" not in payload
+        assert payload["includeDomains"] == ["x.com", "twitter.com"]
+        return [
+            tools.SearchResult(
+                title="X post",
+                url="https://x.com/example/status/1",
+                snippet="lead only",
+            )
+        ]
+
+    monkeypatch.setattr(tools, "_exa_search", fake_exa_search)
+    tool = tools.ExaWebSearchTool()
+    context = _context_with_provider_settings({"websearch_exa_key": ["exa-key"]})
+
+    result = await tool.call(context, query="AstrBot", category="tweet")
+
+    assert json.loads(result)["results"][0]["url"] == "https://x.com/example/status/1"
 
 
 @pytest.mark.asyncio

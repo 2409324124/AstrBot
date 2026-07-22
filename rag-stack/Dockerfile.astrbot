@@ -1,0 +1,7 @@
+ARG ASTRBOT_BASE_IMAGE=soulter/astrbot:latest
+FROM ${ASTRBOT_BASE_IMAGE}
+
+ARG HTTPS_PROXY
+ARG HTTP_PROXY
+
+RUN python -m pip install --no-cache-dir "qdrant-client>=1.17.0,<1.19.0"

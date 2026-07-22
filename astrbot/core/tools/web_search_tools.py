@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import uuid
 from dataclasses import dataclass as std_dataclass
 from dataclasses import field
@@ -11,6 +12,7 @@ from pydantic.dataclasses import dataclass as pydantic_dataclass
 from astrbot.core import logger, sp
 from astrbot.core.agent.tool import FunctionTool, ToolExecResult
 from astrbot.core.astr_agent_context import AstrAgentContext
+from astrbot.core.response_policy import select_trusted_sources
 from astrbot.core.tools.registry import builtin_tool
 
 WEB_SEARCH_TOOL_NAMES = [
@@ -24,6 +26,7 @@ WEB_SEARCH_TOOL_NAMES = [
     "web_search_exa",
     "exa_get_contents",
 ]
+_X_SEARCH_DOMAINS = ("x.com", "twitter.com")
 _TAVILY_WEB_SEARCH_TOOL_CONFIG = {
     "provider_settings.web_search": True,
     "provider_settings.websearch_provider": "tavily",
@@ -110,6 +113,7 @@ _BOCHA_KEY_ROTATOR = _KeyRotator("websearch_bocha_key", "BoCha")
 _BRAVE_KEY_ROTATOR = _KeyRotator("websearch_brave_key", "Brave")
 _FIRECRAWL_KEY_ROTATOR = _KeyRotator("websearch_firecrawl_key", "Firecrawl")
 _EXA_KEY_ROTATOR = _KeyRotator("websearch_exa_key", "Exa")
+_EXA_KEY_ENVIRONMENT_VARIABLE = "ASTRBOT_WEBSEARCH_EXA_KEY"
 
 
 def normalize_legacy_web_search_config(cfg) -> None:
@@ -144,11 +148,33 @@ def normalize_legacy_web_search_config(cfg) -> None:
         cfg.save_config()
 
 
+def _with_environment_exa_keys(provider_settings: dict) -> dict:
+    """Return settings with the deployment-only Exa secret, when needed."""
+    if provider_settings.get("websearch_exa_key"):
+        return provider_settings
+    env_keys = [
+        key.strip()
+        for key in os.environ.get(_EXA_KEY_ENVIRONMENT_VARIABLE, "")
+        .replace("\n", ",")
+        .split(",")
+        if key.strip()
+    ]
+    if not env_keys:
+        return provider_settings
+    return {
+        **provider_settings,
+        "websearch_exa_key": env_keys,
+    }
+
+
 def _get_runtime(context) -> tuple[dict, dict, str]:
     agent_ctx = context.context
     event = agent_ctx.event
     cfg = agent_ctx.context.get_config(umo=event.unified_msg_origin)
     provider_settings = cfg.get("provider_settings", {})
+    # Keep third-party API credentials out of cmd_config.json. The configured
+    # value still wins so dashboard-managed key rotation remains unchanged.
+    provider_settings = _with_environment_exa_keys(provider_settings)
     return cfg, provider_settings, event.unified_msg_origin
 
 
@@ -1054,6 +1080,65 @@ async def _exa_search(
             ]
 
 
+def _search_results_as_sources(results: list[SearchResult]) -> list[dict[str, str]]:
+    return [
+        {
+            "title": result.title,
+            "url": result.url,
+            "snippet": result.snippet,
+        }
+        for result in results
+    ]
+
+
+async def collect_exa_factual_evidence(
+    provider_settings: dict,
+    query: str,
+) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+    """Fetch factual evidence and X leads for the hard reply policy.
+
+    X/Twitter is retrieved as a useful real-time lead but intentionally is not
+    considered a trusted factual source.  A caller must use the first return
+    value to authorise a user-facing factual reply.
+    """
+    settings = _with_environment_exa_keys(provider_settings)
+    if not settings.get("websearch_exa_key"):
+        return [], []
+
+    payload_base = {
+        "query": str(query)[:1000],
+        "numResults": 5,
+        "type": "auto",
+        "contents": {"text": {"maxCharacters": 1000}},
+    }
+    web_payload = dict(payload_base)
+    # Exa removed the legacy `tweet` category. Restricting the supported
+    # general search endpoint to X/Twitter domains preserves the real-time
+    # lead lookup without sending an invalid request.
+    tweet_payload = {
+        **payload_base,
+        "numResults": 3,
+        "includeDomains": list(_X_SEARCH_DOMAINS),
+    }
+    web_result, tweet_result = await asyncio.gather(
+        _exa_search(settings, web_payload),
+        _exa_search(settings, tweet_payload),
+        return_exceptions=True,
+    )
+    if isinstance(web_result, Exception):
+        logger.warning("Exa factual evidence web search failed: %s", web_result)
+        web_sources: list[dict[str, str]] = []
+    else:
+        web_sources = _search_results_as_sources(web_result)
+    if isinstance(tweet_result, Exception):
+        logger.warning("Exa factual evidence X search failed: %s", tweet_result)
+        social_sources: list[dict[str, str]] = []
+    else:
+        social_sources = _search_results_as_sources(tweet_result)
+
+    return select_trusted_sources(web_sources), social_sources
+
+
 async def _exa_get_contents(
     provider_settings: dict,
     payload: dict,
@@ -1108,9 +1193,8 @@ class ExaWebSearchTool(FunctionTool[AstrAgentContext]):
                 "category": {
                     "type": "string",
                     "description": (
-                        "Optional. Category filter. One of "
-                        '"company", "research paper", "news", "github", '
-                        '"tweet", "personal site", "pdf", "linkedin profile".'
+                        "Optional Exa category filter. For X/Twitter results, use "
+                        'include_domains="x.com,twitter.com" rather than a category.'
                     ),
                 },
                 "include_domains": {
@@ -1157,12 +1241,15 @@ class ExaWebSearchTool(FunctionTool[AstrAgentContext]):
             "contents": {"text": {"maxCharacters": 500}},
         }
 
-        category = kwargs.get("category", "")
-        if category:
+        category = str(kwargs.get("category", "")).strip()
+        legacy_tweet_category = category.lower() == "tweet"
+        if category and not legacy_tweet_category:
             payload["category"] = category
 
         include_domains = str(kwargs.get("include_domains", "")).strip()
-        if include_domains:
+        if legacy_tweet_category:
+            payload["includeDomains"] = list(_X_SEARCH_DOMAINS)
+        elif include_domains:
             payload["includeDomains"] = [
                 d.strip() for d in include_domains.split(",") if d.strip()
             ]

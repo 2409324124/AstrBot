@@ -20,6 +20,10 @@ from astrbot.core.persona_error_reply import (
 )
 from astrbot.core.provider.entities import LLMResponse
 from astrbot.core.provider.provider import TTSProvider
+from astrbot.core.response_policy import (
+    REPLY_POLICY_ENABLED_EXTRA_KEY,
+    apply_response_policy_to_chain,
+)
 
 AgentRunner = ToolLoopAgentRunner[AstrAgentContext]
 
@@ -113,6 +117,13 @@ def _merge_buffered_llm_chains(
     return merged_chain
 
 
+def _apply_enabled_reply_policy(astr_event, chain: MessageChain) -> MessageChain:
+    """Apply the deployment policy only when it was enabled at request build."""
+    if not astr_event.get_extra(REPLY_POLICY_ENABLED_EXTRA_KEY, False):
+        return chain
+    return apply_response_policy_to_chain(chain, astr_event)
+
+
 async def run_agent(
     agent_runner: AgentRunner,
     max_step: int = 30,
@@ -195,7 +206,9 @@ async def run_agent(
 
                     if msg_chain.type == "tool_direct_result":
                         # tool_direct_result 用于标记 llm tool 需要直接发送给用户的内容
-                        await astr_event.send(msg_chain)
+                        await astr_event.send(
+                            _apply_enabled_reply_policy(astr_event, msg_chain)
+                        )
                         continue
                     if astr_event.get_platform_id() == "webchat":
                         await astr_event.send(msg_chain)
@@ -237,7 +250,11 @@ async def run_agent(
                         await astr_event.send(chain)
                     continue
                 elif resp.type == "llm_result":
-                    chain = resp.data["chain"]
+                    chain = _apply_enabled_reply_policy(
+                        astr_event,
+                        resp.data["chain"],
+                    )
+                    resp.data["chain"] = chain
                     if chain.type == "reasoning":
                         # For non-streaming mode, we handle reasoning in astrbot/core/astr_agent_hooks.py.
                         # For streaming mode, we yield content immediately when received a reasoning chunk but not in here, see below.
@@ -333,10 +350,14 @@ async def run_agent(
             except Exception:
                 logger.exception("Error in on_agent_done hook")
 
+            err_chain = _apply_enabled_reply_policy(
+                astr_event,
+                MessageChain().message(err_msg),
+            )
             if agent_runner.streaming:
-                yield MessageChain().message(err_msg)
+                yield err_chain
             else:
-                astr_event.set_result(MessageEventResult().message(err_msg))
+                astr_event.set_result(MessageEventResult(chain=err_chain.chain))
             return
 
 

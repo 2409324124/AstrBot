@@ -265,6 +265,51 @@ async def test_ensure_vec_db_clears_stale_init_error(
 
 
 @pytest.mark.asyncio
+async def test_ensure_vec_db_uses_qdrant_when_enabled(
+    stub_provider_manager_module,
+    mock_provider_manager,
+    mock_kb_db,
+    mock_knowledge_base,
+    mock_embedding_provider,
+    monkeypatch,
+):
+    """The explicit environment switch selects the Qdrant backend."""
+    from astrbot.core.knowledge_base.kb_helper import KBHelper
+
+    monkeypatch.setenv("ASTRBOT_VECTOR_DB", "qdrant")
+    monkeypatch.setenv("ASTRBOT_QDRANT_URL", "http://qdrant:6333")
+    monkeypatch.setenv("ASTRBOT_QDRANT_API_KEY", "test-key")
+    monkeypatch.setenv("ASTRBOT_QDRANT_COLLECTION_PREFIX", "test_")
+    mock_provider_manager.get_provider_by_id.return_value = mock_embedding_provider
+
+    helper = KBHelper.__new__(KBHelper)
+    helper.kb = mock_knowledge_base
+    helper.prov_mgr = mock_provider_manager
+    helper.kb_db = mock_kb_db
+    helper.init_error = None
+    helper.kb_dir = Path("/tmp/test_kb") / mock_knowledge_base.kb_id
+
+    mock_vec_db = MagicMock()
+    mock_vec_db.initialize = AsyncMock()
+
+    with patch(
+        "astrbot.core.db.vec_db.qdrant_impl.vec_db.QdrantVecDB",
+        return_value=mock_vec_db,
+    ) as qdrant_cls:
+        result = await helper._ensure_vec_db()
+
+    assert result is mock_vec_db
+    qdrant_cls.assert_called_once_with(
+        doc_store_path=str(helper.kb_dir / "doc.db"),
+        collection_name=f"test_{mock_knowledge_base.kb_id}",
+        qdrant_url="http://qdrant:6333",
+        embedding_provider=mock_embedding_provider,
+        rerank_provider=None,
+        api_key="test-key",
+    )
+
+
+@pytest.mark.asyncio
 async def test_ensure_vec_db_sets_init_error_on_failure(
     stub_provider_manager_module,
     mock_provider_manager,

@@ -12,6 +12,40 @@ from astrbot.core.tools.registry import builtin_tool
 _KNOWLEDGE_BASE_TOOL_CONFIG = {
     "kb_agentic_mode": True,
 }
+_HISTORY_CPU_KB_NAME = "历史 CPU 型号与平台资料库"
+_HISTORY_CPU_DETAIL_MARKERS = (
+    "详细",
+    "完整介绍",
+    "完整报告",
+    "全部细节",
+    "深入介绍",
+    "detailed",
+    "full report",
+)
+_HISTORY_CPU_EXAMPLE_MARKERS = (
+    "例子",
+    "实例",
+    "实测",
+    "测试报告",
+    "benchmark",
+    "case study",
+)
+
+
+def resolve_kb_final_top_k(
+    query: str,
+    kb_names: list[str],
+    configured_top_k: int,
+) -> int:
+    """Expand only the historical CPU corpus for example/detail questions."""
+    if _HISTORY_CPU_KB_NAME not in kb_names:
+        return configured_top_k
+    normalized_query = query.casefold()
+    if any(marker in normalized_query for marker in _HISTORY_CPU_DETAIL_MARKERS):
+        return max(configured_top_k, 15)
+    if any(marker in normalized_query for marker in _HISTORY_CPU_EXAMPLE_MARKERS):
+        return max(configured_top_k, 8)
+    return configured_top_k
 
 
 def check_all_kb(kb_list: list[KBHelper | None]) -> bool:
@@ -69,6 +103,7 @@ async def retrieve_knowledge_base(
         logger.debug("所配置的所有知识库全为空，跳过检索过程")
         return None
 
+    top_k = resolve_kb_final_top_k(query, kb_names, top_k)
     logger.debug(f"[知识库] 开始检索知识库，数量: {len(kb_names)}, top_k={top_k}")
     kb_context = await kb_mgr.retrieve(
         query=query,
@@ -129,5 +164,6 @@ class KnowledgeBaseQueryTool(FunctionTool[AstrAgentContext]):
 __all__ = [
     "KnowledgeBaseQueryTool",
     "check_all_kb",
+    "resolve_kb_final_top_k",
     "retrieve_knowledge_base",
 ]

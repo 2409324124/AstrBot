@@ -10,6 +10,10 @@ from astrbot.core.message.message_event_result import ResultContentType
 from astrbot.core.pipeline.content_safety_check.stage import ContentSafetyCheckStage
 from astrbot.core.platform.astr_message_event import AstrMessageEvent
 from astrbot.core.platform.message_type import MessageType
+from astrbot.core.response_policy import (
+    apply_response_policy_to_chain,
+    prepare_reply_policy_event,
+)
 from astrbot.core.star.session_llm_manager import SessionServiceManager
 from astrbot.core.star.star import star_map
 from astrbot.core.star.star_handler import EventType, star_handlers_registry
@@ -100,6 +104,22 @@ class ResultDecorateStage(Stage):
 
         provider_cfg = ctx.astrbot_config.get("provider_settings", {})
         self.show_reasoning = provider_cfg.get("display_reasoning_text", False)
+        self.verified_factual_reply_policy = bool(
+            provider_cfg.get("verified_factual_reply_policy", False)
+        )
+
+    def _apply_final_reply_policy(
+        self,
+        event: AstrMessageEvent,
+        result,
+    ) -> None:
+        """Enforce the deployment's final reply policy across all result paths."""
+        if not prepare_reply_policy_event(
+            event,
+            enabled=self.verified_factual_reply_policy,
+        ):
+            return
+        result.chain = apply_response_policy_to_chain(result, event).chain
 
     def _split_text_by_words(self, text: str) -> list[str]:
         """使用分段词列表分段文本"""
@@ -420,3 +440,8 @@ class ResultDecorateStage(Stage):
                 # 引用回复
                 if self.reply_with_quote:
                     result.chain.insert(0, Reply(id=event.message_obj.message_id))
+
+            # This is the last shared non-streaming result boundary before
+            # RespondStage sends to a platform. It covers private chat and
+            # alternative result producers that bypass the local Agent runner.
+            self._apply_final_reply_policy(event, result)

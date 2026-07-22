@@ -67,6 +67,7 @@ dependencies = [
   "packaging>=24.2",
   "python-ripgrep==0.0.8",
   "pyotp>=2.9.0",
+  "qdrant-client>=1.17.0,<1.19.0",
 ]
 
 [dependency-groups]

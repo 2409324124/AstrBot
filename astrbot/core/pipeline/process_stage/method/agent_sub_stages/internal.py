@@ -170,6 +170,12 @@ class InternalAgentSubStage(Stage):
             streaming_response = self.streaming_response
             if (enable_streaming := event.get_extra("enable_streaming")) is not None:
                 streaming_response = bool(enable_streaming)
+            if self.main_agent_cfg.provider_settings.get(
+                "verified_factual_reply_policy", False
+            ):
+                # The final reply is replaced when evidence is absent, so it
+                # must not be emitted as irreversible streaming deltas first.
+                streaming_response = False
 
             has_provider_request = event.get_extra("provider_request") is not None
             has_valid_message = bool(event.message_str and event.message_str.strip())

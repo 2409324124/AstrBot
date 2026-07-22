@@ -1,10 +1,10 @@
 import asyncio
 import json
+import os
 import re
 import time
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import aiofiles
 
@@ -28,9 +28,6 @@ from .models import KBDocument, KBMedia, KnowledgeBase
 from .parsers.url_parser import extract_text_from_url
 from .parsers.util import select_parser
 from .prompts import TEXT_REPAIR_SYSTEM_PROMPT
-
-if TYPE_CHECKING:
-    from astrbot.core.db.vec_db.faiss_impl.vec_db import FaissVecDB
 
 
 class RateLimiter:
@@ -169,7 +166,7 @@ class KBHelper:
             return None
         return rp
 
-    async def _ensure_vec_db(self) -> "FaissVecDB":
+    async def _ensure_vec_db(self) -> BaseVecDB:
         if not self.kb.embedding_provider_id:
             raise ValueError(f"知识库 {self.kb.kb_name} 未配置 Embedding Provider")
 
@@ -182,14 +179,35 @@ class KBHelper:
                 f"知识库 {self.kb.kb_name}({self.kb.kb_id}) 初始化重排序能力失败，将跳过重排序: {e}",
             )
 
-        from astrbot.core.db.vec_db.faiss_impl.vec_db import FaissVecDB
+        backend = os.getenv("ASTRBOT_VECTOR_DB", "faiss").strip().lower()
+        if backend == "qdrant":
+            from astrbot.core.db.vec_db.qdrant_impl.vec_db import QdrantVecDB
 
-        vec_db = FaissVecDB(
-            doc_store_path=str(self.kb_dir / "doc.db"),
-            index_store_path=str(self.kb_dir / "index.faiss"),
-            embedding_provider=ep,
-            rerank_provider=rp,
-        )
+            vec_db: BaseVecDB = QdrantVecDB(
+                doc_store_path=str(self.kb_dir / "doc.db"),
+                collection_name=(
+                    os.getenv("ASTRBOT_QDRANT_COLLECTION_PREFIX", "astrbot_kb_")
+                    + self.kb.kb_id
+                ),
+                qdrant_url=os.getenv(
+                    "ASTRBOT_QDRANT_URL",
+                    "http://qdrant:6333",
+                ),
+                embedding_provider=ep,
+                rerank_provider=rp,
+                api_key=os.getenv("ASTRBOT_QDRANT_API_KEY") or None,
+            )
+        elif backend == "faiss":
+            from astrbot.core.db.vec_db.faiss_impl.vec_db import FaissVecDB
+
+            vec_db = FaissVecDB(
+                doc_store_path=str(self.kb_dir / "doc.db"),
+                index_store_path=str(self.kb_dir / "index.faiss"),
+                embedding_provider=ep,
+                rerank_provider=rp,
+            )
+        else:
+            raise ValueError(f"不支持的向量数据库后端: {backend}")
         await vec_db.initialize()
         self.vec_db = vec_db
         # Clear stale init_error once initialization succeeds.
@@ -432,7 +450,7 @@ class KBHelper:
                     details={"file_name": file_name, "doc_id": doc_id},
                 ) from exc
 
-            vec_db: FaissVecDB = self.vec_db  # type: ignore
+            vec_db: BaseVecDB = self.vec_db
             try:
                 await self.kb_db.update_kb_stats(kb_id=self.kb.kb_id, vec_db=vec_db)
                 await self.refresh_kb()
@@ -519,7 +537,7 @@ class KBHelper:
 
     async def delete_chunk(self, chunk_id: str, doc_id: str) -> None:
         """删除单个文本块及其相关数据"""
-        vec_db: FaissVecDB = self.vec_db  # type: ignore
+        vec_db: BaseVecDB = self.vec_db
         await vec_db.delete(chunk_id)
         await self.kb_db.update_kb_stats(
             kb_id=self.kb.kb_id,
@@ -554,7 +572,7 @@ class KBHelper:
         limit: int = 100,
     ) -> list[dict]:
         """获取文档的所有块及其元数据"""
-        vec_db: FaissVecDB = self.vec_db  # type: ignore
+        vec_db: BaseVecDB = self.vec_db
         chunks = await vec_db.document_storage.get_documents(
             metadata_filters={"kb_doc_id": doc_id},
             offset=offset,
@@ -577,7 +595,7 @@ class KBHelper:
 
     async def get_chunk_count_by_doc_id(self, doc_id: str) -> int:
         """获取文档的块数量"""
-        vec_db: FaissVecDB = self.vec_db  # type: ignore
+        vec_db: BaseVecDB = self.vec_db
         count = await vec_db.count_documents(metadata_filter={"kb_doc_id": doc_id})
         return count
 

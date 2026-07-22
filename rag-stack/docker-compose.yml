@@ -1,0 +1,53 @@
+name: astrbot-rag
+
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.18.2
+    container_name: astrbot-qdrant
+    restart: unless-stopped
+    environment:
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:?QDRANT_API_KEY is required}
+    ports:
+      - "127.0.0.1:6333:6333"
+    volumes:
+      - ${RAG_DATA_ROOT:?RAG_DATA_ROOT is required}/qdrant:/qdrant/storage
+      - ./qdrant/config.yaml:/qdrant/config/production.yaml:ro
+    networks:
+      rag:
+        aliases:
+          - qdrant
+
+  embedding-server:
+    image: ghcr.io/huggingface/text-embeddings-inference:86-1.9
+    container_name: astrbot-embedding
+    restart: unless-stopped
+    command:
+      - --model-id
+      - ${EMBEDDING_MODEL_PATH:-/data/bge-m3}
+      - --served-model-name
+      - ${EMBEDDING_MODEL:-BAAI/bge-m3}
+      - --port
+      - "8000"
+      - --dtype
+      - float16
+      - --max-client-batch-size
+      - "64"
+      - --api-key
+      - ${EMBEDDING_API_KEY:?EMBEDDING_API_KEY is required}
+    runtime: nvidia
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    shm_size: 1gb
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ${RAG_DATA_ROOT:?RAG_DATA_ROOT is required}/hf-cache:/data
+    networks:
+      rag:
+        aliases:
+          - embedding-server
+
+networks:
+  rag:
+    name: astrbot-rag

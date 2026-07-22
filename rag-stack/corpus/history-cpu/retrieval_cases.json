@@ -1,0 +1,401 @@
+{
+  "retrieval_top_k_by_layer": {
+    "overview": 5,
+    "example": 8,
+    "detail": 15
+  },
+  "cases": [
+    {
+      "id": "xeon_e5_exact_sku",
+      "layer": "overview",
+      "expected_documents": ["10_Intel_Xeon_E5初代至v4完整型号.md"],
+      "query": "Xeon E5-2699 v4 有多少核心、基础频率和 TDP？",
+      "required_term_groups": [
+        ["E5-2699 v4"],
+        ["22"],
+        ["2.20 GHz"],
+        ["145 W"]
+      ]
+    },
+    {
+      "id": "epyc_7742_platform",
+      "layer": "detail",
+      "expected_documents": ["21_AMD_EPYC_7001与7002完整型号.md"],
+      "query": "EPYC 7742 的核心数、TDP 和单双路能力是什么？",
+      "required_term_groups": [
+        ["7742"],
+        ["64/128"],
+        ["225W"],
+        ["1P/2P"]
+      ]
+    },
+    {
+      "id": "threadripper_pro_compatibility",
+      "layer": "detail",
+      "expected_documents": ["20_AMD_Threadripper_Zen到Zen2完整型号.md"],
+      "query": "Threadripper PRO 3995WX 有多少内存通道和 PCIe lanes，能否装在 TRX40？",
+      "required_term_groups": [
+        ["PRO 3995WX", "3995WX"],
+        ["8 通道"],
+        ["128"],
+        ["sWRX8", "WRX80"]
+      ]
+    },
+    {
+      "id": "xeon_scalable_generation_comparison",
+      "layer": "overview",
+      "expected_documents": ["12_Intel_Xeon_Scalable第一至三代完整型号.md"],
+      "query": "第一代和第三代 Xeon Scalable 的内存通道与 PCIe 代际有什么区别？",
+      "required_term_groups": [
+        ["六通道"],
+        ["八通道"],
+        ["PCIe 3.0"],
+        ["PCIe 4.0"]
+      ]
+    },
+    {
+      "id": "rome_generation_overview",
+      "layer": "overview",
+      "expected_documents": ["30_案例_EPYC7742_Rome_NUMA与HPC实测.md"],
+      "query": "AMD EPYC Rome 这一代总体性能和 NUMA 特点如何？",
+      "required_term_groups": [
+        ["Rome"],
+        ["NPS4"],
+        ["8 通道", "八通道"],
+        ["每核心带宽"]
+      ]
+    },
+    {
+      "id": "rome_specific_benchmark_example",
+      "layer": "example",
+      "expected_documents": ["30_案例_EPYC7742_Rome_NUMA与HPC实测.md"],
+      "query": "能给一个 EPYC 7002 Rome 的具体 HPC 性能测试例子吗？",
+      "required_term_groups": [
+        ["EPYC 7742"],
+        ["NASA"],
+        ["54–57%", "54-57%"]
+      ]
+    },
+    {
+      "id": "threadripper_3970x_detailed_hpc",
+      "layer": "detail",
+      "expected_documents": ["31_案例_Threadripper3970X_NUMA与HPC实测.md"],
+      "query": "详细介绍 Threadripper 3970X 做 HPC 和有限元类似负载的表现。",
+      "required_term_groups": [
+        ["1326 GFLOP/s"],
+        ["N=114000"],
+        ["HPCG"],
+        ["约8核", "约 8 核"],
+        ["四通道"]
+      ]
+    },
+    {
+      "id": "xeon_e5_v2_v3_engineering_example",
+      "layer": "example",
+      "expected_documents": ["32_案例_Xeon_E5v2与v3_NREL科学工程实测.md"],
+      "query": "给一个 Xeon E5 v2 到 v3 的科学计算和工程仿真实测例子。",
+      "required_term_groups": [
+        ["E5-2695 v2"],
+        ["E5-2699 v3"],
+        ["2.193"],
+        ["FAST"],
+        ["23%"]
+      ]
+    },
+    {
+      "id": "xeon_e5_v4_hpcg_detail",
+      "layer": "detail",
+      "expected_documents": ["33_案例_Xeon_E5v4与Gold6248_NUMA_HPCG实测.md"],
+      "query": "E5-2697 v4 跑稀疏求解或 HPCG 的具体表现如何？",
+      "required_term_groups": [
+        ["E5-2697 v4"],
+        ["8.98 GFLOP/s"],
+        ["160^3"],
+        ["NUMA balancing"]
+      ]
+    },
+    {
+      "id": "xeon_gold_6248_numa_hpcg_detail",
+      "layer": "detail",
+      "expected_documents": ["33_案例_Xeon_E5v4与Gold6248_NUMA_HPCG实测.md"],
+      "query": "Gold 6248 的 NUMA、THP 和 HPCG 有什么实测例子？",
+      "required_term_groups": [
+        ["Gold 6248"],
+        ["13.95 GFLOP/s"],
+        ["THP"],
+        ["12%"]
+      ]
+    },
+    {
+      "id": "threadripper_2990wx_hpl_example",
+      "layer": "example",
+      "expected_documents": ["34_案例_Threadripper2990WX_非对称NUMA与HPC实测.md"],
+      "query": "第二代 Threadripper 能给一个具体 HPC 实测例子吗？",
+      "required_term_groups": [
+        ["2990WX"],
+        ["596.5 GFLOP/s"],
+        ["8 个 MPI rank", "8 MPI rank"],
+        ["4 个 OpenMP", "4 OpenMP"]
+      ]
+    },
+    {
+      "id": "threadripper_2990wx_numa_detail",
+      "layer": "detail",
+      "expected_documents": ["34_案例_Threadripper2990WX_非对称NUMA与HPC实测.md"],
+      "query": "详细解释 2990WX 的 NUMA、远程访存和科学计算限制。",
+      "required_term_groups": [
+        ["两个 die 直接连接", "两个直连内存 die"],
+        ["两个计算 die", "两个远程访存 die"],
+        ["Dynamic Local Mode"],
+        ["L3 cache"],
+        ["没有直接有限元成绩"]
+      ]
+    },
+    {
+      "id": "threadripper_pro_3995wx_hpc_example",
+      "layer": "example",
+      "expected_documents": ["35_案例_ThreadripperPRO3995WX_八通道HPCG与NAMD实测.md"],
+      "query": "给一个 Threadripper PRO 3000WX 做 HPC 的具体测试例子。",
+      "required_term_groups": [
+        ["3995WX"],
+        ["N=114000"],
+        ["NB=768"],
+        ["HPCG 3.1"],
+        ["16 核"]
+      ]
+    },
+    {
+      "id": "threadripper_pro_3995wx_simulation_detail",
+      "layer": "detail",
+      "expected_documents": ["35_案例_ThreadripperPRO3995WX_八通道HPCG与NAMD实测.md"],
+      "query": "详细介绍 3995WX 的 NUMA、稀疏 PDE 和分子模拟表现。",
+      "required_term_groups": [
+        ["8×16 GB DDR4-3200"],
+        ["稀疏二阶偏微分方程"],
+        ["92,000 原子", "92k"],
+        ["1,000,000 原子", "100 万原子"],
+        ["不是直接有限元软件成绩"]
+      ]
+    },
+    {
+      "id": "epyc_7601_naples_stream_example",
+      "layer": "example",
+      "expected_documents": ["36_案例_EPYC7601_Naples_NUMA_STREAM与OpenFOAM实测.md"],
+      "query": "第一代 EPYC Naples 能给一个具体的内存带宽测试例子吗？",
+      "required_term_groups": [
+        ["EPYC 7601"],
+        ["149,375"],
+        ["290,228"],
+        ["STREAM Triad"],
+        ["146%"]
+      ]
+    },
+    {
+      "id": "epyc_7601_numa_openfoam_detail",
+      "layer": "detail",
+      "expected_documents": ["36_案例_EPYC7601_Naples_NUMA_STREAM与OpenFOAM实测.md"],
+      "query": "详细介绍双路 EPYC 7601 的 NUMA 节点和 OpenFOAM 实测。",
+      "required_term_groups": [
+        ["8 个 NUMA node", "8 NUMA node"],
+        ["10/16/32"],
+        ["OpenFOAM 1906"],
+        ["motorbike"],
+        ["27%"]
+      ]
+    },
+    {
+      "id": "xeon_platinum_8380_openfoam_example",
+      "layer": "example",
+      "expected_documents": ["37_案例_XeonPlatinum8380_IceLake_NUMA与OpenFOAM实测.md"],
+      "query": "第三代 Xeon Scalable 有具体的 OpenFOAM 代际实测吗？",
+      "required_term_groups": [
+        ["Platinum 8380"],
+        ["8160 = **1.00**", "8160=1.00"],
+        ["8280 = **1.10**", "8280=1.10"],
+        ["8380 = **1.67**", "8380=1.67"],
+        ["8 通道 DDR4-3200"]
+      ]
+    },
+    {
+      "id": "xeon_platinum_8380_hpc_detail",
+      "layer": "detail",
+      "expected_documents": ["37_案例_XeonPlatinum8380_IceLake_NUMA与OpenFOAM实测.md"],
+      "query": "详细介绍双路 Platinum 8380 的 NUMA、HPC 和工程仿真实测。",
+      "required_term_groups": [
+        ["16×32 GB DDR4-3200"],
+        ["Linux 5.11"],
+        ["110 项测试"],
+        ["LULESH"],
+        ["没有直接结构有限元成绩"]
+      ]
+    },
+    {
+      "id": "threadripper_1950x_linux_hpc_example",
+      "layer": "example",
+      "expected_documents": ["38_案例_Threadripper1950X_双Die_NUMA与LinuxHPC实测.md"],
+      "query": "第一代 Threadripper 有具体的 Linux HPC 实测例子吗？",
+      "required_term_groups": [
+        ["NPB"],
+        ["24%"],
+        ["OpenSSL"],
+        ["12%"],
+        ["36 秒"]
+      ]
+    },
+    {
+      "id": "threadripper_1950x_numa_modes_detail",
+      "layer": "detail",
+      "expected_documents": ["38_案例_Threadripper1950X_双Die_NUMA与LinuxHPC实测.md"],
+      "query": "详细解释 1950X 的双 die、NUMA、Creator Mode 和 Game Mode。",
+      "required_term_groups": [
+        ["两个活跃 Zeppelin die"],
+        ["Creator Mode"],
+        ["Game Mode"],
+        ["-48%"],
+        ["HPCG 绝对值未"]
+      ]
+    },
+    {
+      "id": "ryzen_zen_1600x_scientific_example",
+      "layer": "example",
+      "expected_documents": ["39_案例_Ryzen5_Zen到Zen2_CCX与科学负载实测.md"],
+      "query": "第一代 Ryzen 5 能给一个多线程科学工作负载例子吗？",
+      "required_term_groups": [
+        ["Ryzen 5 1600X"],
+        ["12 线程"],
+        ["Chromium 编译"],
+        ["ray tracing"],
+        ["单线程 IPC"]
+      ]
+    },
+    {
+      "id": "ryzen_zenplus_2600x_scientific_example",
+      "layer": "example",
+      "expected_documents": ["39_案例_Ryzen5_Zen到Zen2_CCX与科学负载实测.md"],
+      "query": "Zen+ 的 Ryzen 5 2600X 有什么科学计算类似负载？",
+      "required_term_groups": [
+        ["Ryzen 5 2600X"],
+        ["3DPM"],
+        ["Brownian Motion"],
+        ["双 CCX"],
+        ["没有可核对的 2600X 绝对结果"]
+      ]
+    },
+    {
+      "id": "ryzen_zen2_3600_topology_detail",
+      "layer": "detail",
+      "expected_documents": ["39_案例_Ryzen5_Zen到Zen2_CCX与科学负载实测.md"],
+      "query": "详细介绍 Ryzen 5 3600 的 CCX 延迟、科学负载和功耗。",
+      "required_term_groups": [
+        ["7.5 ns"],
+        ["34 ns"],
+        ["87–91 ns"],
+        ["NAMD ApoA1"],
+        ["90 W"]
+      ]
+    },
+    {
+      "id": "xeon_platinum_8180_namd_example",
+      "layer": "example",
+      "expected_documents": ["40_案例_XeonPlatinum8180_双路NUMA_NAMD与多GPU实测.md"],
+      "query": "第一代 Xeon Scalable 有具体的 HPC 扩展例子吗？",
+      "required_term_groups": [
+        ["Platinum 8180"],
+        ["0.595"],
+        ["42.2×"],
+        ["2.3 GHz"]
+      ]
+    },
+    {
+      "id": "xeon_platinum_8180_multigpu_detail",
+      "layer": "detail",
+      "expected_documents": ["40_案例_XeonPlatinum8180_双路NUMA_NAMD与多GPU实测.md"],
+      "query": "详细介绍双路 8180 的 NUMA、NAMD 和 8 GPU 扩展。",
+      "required_term_groups": [
+        ["768 GB"],
+        ["8×GTX 1080 Ti", "8×GTX1080Ti"],
+        ["5.882"],
+        ["32.1%"],
+        ["P=0.70"]
+      ]
+    },
+    {
+      "id": "xeon_e5_v1_2670_affinity_example",
+      "layer": "example",
+      "expected_documents": ["41_案例_XeonE5-2670_双路NUMA与OpenMP亲和性实测.md"],
+      "query": "初代 Xeon E5 能给一个双路 NUMA 科学计算的具体例子吗？",
+      "required_term_groups": [
+        ["E5-2670"],
+        ["MareNostrum III"],
+        ["2^33"],
+        ["20% 性能提升", "约 20% 性能提升"]
+      ]
+    },
+    {
+      "id": "xeon_e5_v1_2670_numa_detail",
+      "layer": "detail",
+      "expected_documents": ["41_案例_XeonE5-2670_双路NUMA与OpenMP亲和性实测.md"],
+      "query": "详细介绍 E5-2670 的双路 NUMA、STREAM、OpenMP 亲和性和有限元意义。",
+      "required_term_groups": [
+        ["两个 NUMA node"],
+        ["8×4 GB DDR3-1600"],
+        ["STREAM"],
+        ["task-parallel merge sort"],
+        ["不是直接的 ANSYS、Abaqus 或 CalculiX 成绩"]
+      ]
+    },
+    {
+      "id": "xeon_e7_v1_8870_multisocket_example",
+      "layer": "example",
+      "expected_documents": ["42_案例_XeonE7_v1到v4_多路NUMA_SPEC与工程代理实测.md"],
+      "query": "初代 Xeon E7 能给一个多路服务器的具体例子吗？",
+      "required_term_groups": [
+        ["8×E7-8870"],
+        ["80 个物理核"],
+        ["2.40 GHz"],
+        ["178,400 MTOPs"],
+        ["不是数据库、HPC 或有限元 benchmark"]
+      ]
+    },
+    {
+      "id": "xeon_e7_v2_4890_numa_sql_detail",
+      "layer": "detail",
+      "expected_documents": ["42_案例_XeonE7_v1到v4_多路NUMA_SPEC与工程代理实测.md"],
+      "query": "详细介绍 E7-4890 v2 四路 NUMA、大内存和 SQL 实测。",
+      "required_term_groups": [
+        ["4 个 NUMA node"],
+        ["4×E7-4890 v2"],
+        ["1 TB 内存"],
+        ["15%"],
+        ["2300 增至 2500"]
+      ]
+    },
+    {
+      "id": "xeon_e7_v3_8890_spec_example",
+      "layer": "example",
+      "expected_documents": ["42_案例_XeonE7_v1到v4_多路NUMA_SPEC与工程代理实测.md"],
+      "query": "Xeon E7 v3 有什么四路科学浮点实测例子？",
+      "required_term_groups": [
+        ["E7-8890 v3"],
+        ["72 个物理核"],
+        ["CFP2006"],
+        ["103/109"],
+        ["不能声称 v3 架构本身快了固定百分比"]
+      ]
+    },
+    {
+      "id": "xeon_e7_v4_8890_omp_fea_detail",
+      "layer": "detail",
+      "expected_documents": ["42_案例_XeonE7_v1到v4_多路NUMA_SPEC与工程代理实测.md"],
+      "query": "详细介绍 E7-8890 v4 十六路 NUMA、SPEC OMP 和有限元类似负载。",
+      "required_term_groups": [
+        ["16×E7-8890 v4"],
+        ["384 个物理核"],
+        ["59.8"],
+        ["67.2"],
+        ["362.fma3d"],
+        ["370.mgrid331"]
+      ]
+    }
+  ]
+}

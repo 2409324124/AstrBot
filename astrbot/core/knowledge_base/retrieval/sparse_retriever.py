@@ -6,18 +6,15 @@
 import json
 import os
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 from rank_bm25 import BM25Okapi
 
+from astrbot.core.db.vec_db.base import BaseVecDB
 from astrbot.core.knowledge_base.kb_db_sqlite import KBSQLiteDatabase
 from astrbot.core.knowledge_base.retrieval.tokenizer import (
     load_stopwords,
     tokenize_text,
 )
-
-if TYPE_CHECKING:
-    from astrbot.core.db.vec_db.faiss_impl import FaissVecDB
 
 
 @dataclass
@@ -75,7 +72,7 @@ class SparseRetriever:
         fallback_kb_ids = []
         query_tokens = tokenize_text(query, self.hit_stopwords)
         for kb_id in kb_ids:
-            vec_db: FaissVecDB | None = kb_options.get(kb_id, {}).get("vec_db")
+            vec_db: BaseVecDB | None = kb_options.get(kb_id, {}).get("vec_db")
             if not vec_db:
                 continue
             top_k_sparse = kb_options.get(kb_id, {}).get("top_k_sparse", 50)
@@ -120,7 +117,7 @@ class SparseRetriever:
         top_k_sparse = 0
         chunks = []
         for kb_id in kb_ids:
-            vec_db: FaissVecDB | None = kb_options.get(kb_id, {}).get("vec_db")
+            vec_db: BaseVecDB | None = kb_options.get(kb_id, {}).get("vec_db")
             if not vec_db:
                 continue
             result = await vec_db.document_storage.get_documents(

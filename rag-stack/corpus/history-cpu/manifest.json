@@ -1,0 +1,321 @@
+{
+  "schema_version": 1,
+  "knowledge_base_name": "历史 CPU 型号与平台资料库",
+  "embedding_provider_id": "local_bge_m3",
+  "chunk_size": 1200,
+  "chunk_overlap": 120,
+  "retrieval_cases": "retrieval_cases.json",
+  "source_policy": "vendor-primary",
+  "planned_families": [
+    "intel_xeon_e5_e7_v1_v4",
+    "intel_xeon_scalable_gen1_gen3",
+    "amd_ryzen_3_5_zen_zenplus_zen2",
+    "amd_threadripper_1000_2000_3000",
+    "amd_threadripper_pro_3000wx",
+    "amd_epyc_7001_7002"
+  ],
+  "documents": [
+    {
+      "path": "00_范围_字段与可信度.md",
+      "families": [
+        "all"
+      ],
+      "source_urls": [
+        "https://www.intel.com/content/www/us/en/ark.html",
+        "https://www.amd.com/en/products/specifications/processors.html",
+        "https://www.amd.com/en/technologies/zen-core.html"
+      ]
+    },
+    {
+      "path": "10_Intel_Xeon_E5初代至v4完整型号.md",
+      "families": [
+        "intel_xeon_e5_e7_v1_v4"
+      ],
+      "source_urls": [
+        "https://www.intel.com/content/www/us/en/ark/products/series/59138/intel-xeon-processor-e5-family.html",
+        "https://www.intel.com/content/www/us/en/ark/products/series/78582/intel-xeon-processor-e5-v2-family.html",
+        "https://www.intel.com/content/www/us/en/ark/products/series/78583/intel-xeon-processor-e5-v3-family.html",
+        "https://www.intel.com/content/www/us/en/ark/products/series/91287/intel-xeon-processor-e5-v4-family.html"
+      ]
+    },
+    {
+      "path": "11_Intel_Xeon_E7初代至v4完整型号.md",
+      "families": [
+        "intel_xeon_e5_e7_v1_v4"
+      ],
+      "source_urls": [
+        "https://www.intel.com/content/www/us/en/ark/products/series/59139/intel-xeon-processor-e7-family.html",
+        "https://www.intel.com/content/www/us/en/ark/products/series/78584/intel-xeon-processor-e7-v2-family.html",
+        "https://www.intel.com/content/www/us/en/ark/products/series/78585/intel-xeon-processor-e7-v3-family.html",
+        "https://www.intel.com/content/www/us/en/ark/products/series/93797/intel-xeon-processor-e7-v4-family.html"
+      ]
+    },
+    {
+      "path": "12_Intel_Xeon_Scalable第一至三代完整型号.md",
+      "families": [
+        "intel_xeon_scalable_gen1_gen3"
+      ],
+      "source_urls": [
+        "https://www.intel.com/content/www/us/en/ark/products/series/125191/intel-xeon-scalable-processors.html",
+        "https://www.intel.com/content/www/us/en/ark/products/series/192283/2nd-gen-intel-xeon-scalable-processors.html",
+        "https://www.intel.com/content/www/us/en/ark/products/series/204098/3rd-gen-intel-xeon-scalable-processors.html"
+      ]
+    },
+    {
+      "path": "20_AMD_Threadripper_Zen到Zen2完整型号.md",
+      "families": [
+        "amd_threadripper_1000_2000_3000",
+        "amd_threadripper_pro_3000wx"
+      ],
+      "source_urls": [
+        "https://www.amd.com/en/newsroom/press-releases/2017-7-30-ultimate-boost-for-high-end-desktop-market-with-a.html",
+        "https://www.amd.com/en/newsroom/press-releases/2018-8-13-amd-launches-world-s-most-powerful-desktop-process.html",
+        "https://www.amd.com/en/newsroom/press-releases/2019-11-7-amd-introduces-world-s-fastest-high-end-desktop-pr.html",
+        "https://www.amd.com/en/newsroom/press-releases/2020-1-6-amd-announces-world-s-highest-performance-desktop-.html",
+        "https://www.amd.com/en/newsroom/press-releases/2020-7-14-amd-announce-world-s-first-64-core-pro-workstation.html"
+      ]
+    },
+    {
+      "path": "21_AMD_EPYC_7001与7002完整型号.md",
+      "families": [
+        "amd_epyc_7001_7002"
+      ],
+      "source_urls": [
+        "https://www.amd.com/en/products/embedded/epyc/epyc-7001-series.html",
+        "https://www.amd.com/content/dam/amd/en/documents/epyc-business-docs/solution-briefs/amd_epyc_7371_processors_the_right_choice_for_hpc.pdf",
+        "https://www.amd.com/en/products/processors/server/epyc/7002-series.html",
+        "https://www.amd.com/content/dam/amd/en/documents/products/epyc/amd-epyc-7002-series-datasheet.pdf"
+      ]
+    },
+    {
+      "path": "22_AMD_Ryzen3与Ryzen5_Zen到Zen2桌面型号.md",
+      "families": [
+        "amd_ryzen_3_5_zen_zenplus_zen2"
+      ],
+      "source_urls": [
+        "https://www.amd.com/en/products/specifications/processors.html",
+        "https://www.amd.com/en/technologies/zen-core.html",
+        "https://www.amd.com/en/newsroom/press-releases/2017-3-15-amd-ryzen-5-cpus-to-power-performance-desktop-pcs-.html",
+        "https://www.amd.com/en/newsroom/press-releases/2017-7-27-amd-completes-ryzen-mainstream-desktop-lineup-wit.html",
+        "https://www.amd.com/en/newsroom/press-releases/2018-2-12-first-amd-ryzen-desktop-apus-featuring-world-s-mo.html",
+        "https://www.amd.com/en/newsroom/press-releases/2018-4-13-2nd-generation-amd-ryzen-processors-ultimate-des.html",
+        "https://www.amd.com/en/newsroom/press-releases/2019-5-26-amd-announces-next-generation-leadership-products.html",
+        "https://www.amd.com/en/newsroom/press-releases/2019-7-7-amd-unleashes-ultimate-pc-gaming-platform-with-wor.html",
+        "https://www.amd.com/en/newsroom/press-releases/2020-4-21-amd-expands-3rd-gen-amd-ryzen-desktop-processor-fa.html",
+        "https://www.amd.com/en/newsroom/press-releases/2020-6-16-amd-offers-enthusiasts-more-choice-than-ever-befor.html",
+        "https://www.amd.com/en/newsroom/press-releases/2020-7-21-amd-ryzen-4000-series-desktop-processors-with-amd-.html"
+      ]
+    },
+    {
+      "path": "30_案例_EPYC7742_Rome_NUMA与HPC实测.md",
+      "document_type": "representative_case",
+      "families": [
+        "amd_epyc_7001_7002"
+      ],
+      "representative_generations": [
+        "amd_epyc_7002"
+      ],
+      "source_urls": [
+        "https://www.amd.com/content/dam/amd/en/documents/products/epyc/amd-epyc-7002-series-datasheet.pdf",
+        "https://www.nas.nasa.gov/assets/nas/pdf/papers/NAS_Technical_Report_NAS-2022_01.pdf",
+        "https://doi.org/10.1109/IPDPSW55747.2022.00141",
+        "https://doi.org/10.1109/TPDS.2021.3078153",
+        "https://doi.org/10.20944/preprints202404.0219.v1"
+      ]
+    },
+    {
+      "path": "31_案例_Threadripper3970X_NUMA与HPC实测.md",
+      "document_type": "representative_case",
+      "families": [
+        "amd_threadripper_1000_2000_3000"
+      ],
+      "representative_generations": [
+        "amd_threadripper_3000"
+      ],
+      "source_urls": [
+        "https://www.amd.com/en/newsroom/press-releases/2019-11-7-amd-introduces-world-s-fastest-high-end-desktop-pr.html",
+        "https://www.pugetsystems.com/labs/hpc/threadripper-3990x-vs-3970x-performance-and-scaling-hpl-numpy-namd-plus-gpus-1692/",
+        "https://www.pugetsystems.com/labs/hpc/hpc-parallel-performance-for-3rd-gen-threadripper-xeon-3265w-and-epyc-7742-hpl-hpcg-numpy-namd-1717/",
+        "https://www.servethehome.com/amd-ryzen-threadripper-3970x-review-32-cores-of-madness/"
+      ]
+    },
+    {
+      "path": "32_案例_Xeon_E5v2与v3_NREL科学工程实测.md",
+      "document_type": "representative_case",
+      "families": [
+        "intel_xeon_e5_e7_v1_v4"
+      ],
+      "representative_generations": [
+        "intel_xeon_e5_v2",
+        "intel_xeon_e5_v3"
+      ],
+      "source_urls": [
+        "https://www.osti.gov/servlets/purl/1226160",
+        "https://doi.org/10.2172/1226160",
+        "https://www.intel.com/content/www/us/en/ark/products/series/78582/intel-xeon-processor-e5-v2-family.html",
+        "https://www.intel.com/content/www/us/en/ark/products/series/78583/intel-xeon-processor-e5-v3-family.html"
+      ]
+    },
+    {
+      "path": "33_案例_Xeon_E5v4与Gold6248_NUMA_HPCG实测.md",
+      "document_type": "representative_case",
+      "families": [
+        "intel_xeon_e5_e7_v1_v4",
+        "intel_xeon_scalable_gen1_gen3"
+      ],
+      "representative_generations": [
+        "intel_xeon_e5_v4",
+        "intel_xeon_scalable_gen2"
+      ],
+      "source_urls": [
+        "https://www.osti.gov/servlets/purl/1771077",
+        "https://doi.org/10.2172/1771077",
+        "https://www.intel.com/content/www/us/en/ark/products/series/91287/intel-xeon-processor-e5-v4-family.html",
+        "https://www.intel.com/content/www/us/en/ark/products/series/125191/intel-xeon-scalable-processors.html",
+        "https://www.intel.com/content/www/us/en/ark/products/series/192283/2nd-gen-intel-xeon-scalable-processors.html"
+      ]
+    },
+    {
+      "path": "34_案例_Threadripper2990WX_非对称NUMA与HPC实测.md",
+      "document_type": "representative_case",
+      "families": [
+        "amd_threadripper_1000_2000_3000"
+      ],
+      "representative_generations": [
+        "amd_threadripper_2000"
+      ],
+      "source_urls": [
+        "https://www.amd.com/en/support/downloads/drivers.html/processors/ryzen-threadripper/ryzen-threadripper-2000-series/amd-ryzen-threadripper-2990wx.html",
+        "https://www.pugetsystems.com/labs/hpc/how-to-run-an-optimized-hpl-linpack-benchmark-on-amd-ryzen-threadripper-2990wx-32-core-performance-1291/",
+        "https://www.pugetsystems.com/labs/hpc/amd-threadripper-and-1-4-nvidia-2080ti-and-2070-for-namd-molecular-dynamics-1321/",
+        "https://www.amd.com/en/newsroom/press-releases/2018-10-29-amd-expands-2nd-generation-ryzen-threadripper-de.html"
+      ]
+    },
+    {
+      "path": "35_案例_ThreadripperPRO3995WX_八通道HPCG与NAMD实测.md",
+      "document_type": "representative_case",
+      "families": [
+        "amd_threadripper_pro_3000wx",
+        "amd_threadripper_1000_2000_3000"
+      ],
+      "representative_generations": [
+        "amd_threadripper_pro_3000wx"
+      ],
+      "source_urls": [
+        "https://www.amd.com/en/support/downloads/drivers.html/processors/ryzen-threadripper-pro/ryzen-threadripper-pro-3000wx-series/amd-ryzen-threadripper-pro-3995wx.html",
+        "https://www.pugetsystems.com/labs/hpc/AMD-Threadripper-Pro-3995x-HPL-HPCG-NAMD-Performance-Testing-Preliminary-2085/"
+      ]
+    },
+    {
+      "path": "36_案例_EPYC7601_Naples_NUMA_STREAM与OpenFOAM实测.md",
+      "document_type": "representative_case",
+      "families": [
+        "amd_epyc_7001_7002"
+      ],
+      "representative_generations": [
+        "amd_epyc_7001"
+      ],
+      "source_urls": [
+        "https://www.amd.com/content/dam/amd/en/documents/epyc-business-docs/performance-briefs/AMD-EPYC-SoC-Delivers-Exceptional-Results.pdf",
+        "https://www.amd.com/content/dam/amd/en/documents/epyc-business-docs/solution-briefs/AMD-EPYC-7002-OpenFOAM.pdf",
+        "https://prace-ri.eu/wp-content/uploads/Best-Practice-Guide_AMD.pdf"
+      ]
+    },
+    {
+      "path": "37_案例_XeonPlatinum8380_IceLake_NUMA与OpenFOAM实测.md",
+      "document_type": "representative_case",
+      "families": [
+        "intel_xeon_scalable_gen1_gen3"
+      ],
+      "representative_generations": [
+        "intel_xeon_scalable_gen3"
+      ],
+      "source_urls": [
+        "https://www.intel.com/content/dam/www/central-libraries/us/en/documents/2022-05/openfoam-scalable-processors-brief.pdf",
+        "https://www.phoronix.com/review/intel-xeon-8380-linux"
+      ]
+    },
+    {
+      "path": "38_案例_Threadripper1950X_双Die_NUMA与LinuxHPC实测.md",
+      "document_type": "representative_case",
+      "families": [
+        "amd_threadripper_1000_2000_3000"
+      ],
+      "representative_generations": [
+        "amd_threadripper_1000"
+      ],
+      "source_urls": [
+        "https://www.anandtech.com/show/11697/the-amd-ryzen-threadripper-1950x-and-1920x-review",
+        "https://www.anandtech.com/show/11726/retesting-amd-ryzen-threadrippers-game-mode-halving-cores-for-more-performance",
+        "https://www.phoronix.com/review/amd-tr-1950x",
+        "https://www.phoronix.com/review/threadripper-1950x-pre/2"
+      ]
+    },
+    {
+      "path": "39_案例_Ryzen5_Zen到Zen2_CCX与科学负载实测.md",
+      "document_type": "representative_case",
+      "families": [
+        "amd_ryzen_3_5_zen_zenplus_zen2"
+      ],
+      "representative_generations": [
+        "amd_ryzen_zen",
+        "amd_ryzen_zenplus",
+        "amd_ryzen_zen2"
+      ],
+      "source_urls": [
+        "https://www.anandtech.com/show/11244/the-amd-ryzen-5-1600x-vs-core-i5-review-twelve-threads-vs-four",
+        "https://www.anandtech.com/show/12625/amd-second-generation-ryzen-7-2700x-2700-ryzen-5-2600x-2600",
+        "https://www.anandtech.com/show/15787/amd-ryzen-5-3600-review-amazons-best-selling-cpu",
+        "https://www.tomshardware.com/reviews/amd-ryzen-5-3600-review,6287.html"
+      ]
+    },
+    {
+      "path": "40_案例_XeonPlatinum8180_双路NUMA_NAMD与多GPU实测.md",
+      "document_type": "representative_case",
+      "families": [
+        "intel_xeon_scalable_gen1_gen3"
+      ],
+      "representative_generations": [
+        "intel_xeon_scalable_gen1"
+      ],
+      "source_urls": [
+        "https://www.pugetsystems.com/labs/hpc/namd-performance-on-xeon-scalable-8180-and-8-gtx-1080ti-gpus-1124/",
+        "https://prace-ri.eu/wp-content/uploads/Best-Practice-Guide_AMD.pdf"
+      ]
+    },
+    {
+      "path": "41_案例_XeonE5-2670_双路NUMA与OpenMP亲和性实测.md",
+      "document_type": "representative_case",
+      "families": [
+        "intel_xeon_e5_e7_v1_v4"
+      ],
+      "representative_generations": [
+        "intel_xeon_e5_v1"
+      ],
+      "source_urls": [
+        "https://www.osti.gov/servlets/purl/1369612"
+      ]
+    },
+    {
+      "path": "42_案例_XeonE7_v1到v4_多路NUMA_SPEC与工程代理实测.md",
+      "document_type": "representative_case",
+      "families": [
+        "intel_xeon_e5_e7_v1_v4"
+      ],
+      "representative_generations": [
+        "intel_xeon_e7_v1",
+        "intel_xeon_e7_v2",
+        "intel_xeon_e7_v3",
+        "intel_xeon_e7_v4"
+      ],
+      "source_urls": [
+        "https://www.intel.com/content/dam/www/public/ijkk/jp/ja/documents/white-papers/xeon-e7-enterprise-system-performance-paper.pdf",
+        "https://www.intel.com/content/dam/support/us/en/documents/processors/CTP-Metrics-for-Intel-Xeon-Processor.pdf",
+        "https://www.spec.org/cpu2006/results/cint2006/",
+        "https://www.spec.org/cpu2006/results/cfp2006/",
+        "https://www.spec.org/cpu2017/results/res2017q2/cpu2017-20161026-00010.html",
+        "https://www.spec.org/omp2012/results/res2017q2/omp2012-20170519-00097.pdf"
+      ]
+    }
+  ]
+}

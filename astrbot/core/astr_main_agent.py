@@ -30,6 +30,17 @@ from astrbot.core.astr_main_agent_resources import (
 )
 from astrbot.core.conversation_mgr import Conversation
 from astrbot.core.db import BaseDatabase
+from astrbot.core.intent_router import (
+    IntentDecision,
+    IntentRoute,
+    classify_intent,
+)
+from astrbot.core.local_evidence import (
+    activate_lorebook,
+    build_local_evidence_prompt,
+    build_runtime_config_evidence,
+    load_lorebook,
+)
 from astrbot.core.message.components import File, Image, Record, Reply, Video
 from astrbot.core.persona_error_reply import (
     extract_persona_custom_error_message_from_persona,
@@ -39,6 +50,12 @@ from astrbot.core.platform.astr_message_event import AstrMessageEvent
 from astrbot.core.provider import Provider
 from astrbot.core.provider.entities import ProviderRequest
 from astrbot.core.provider.register import llm_tools
+from astrbot.core.response_policy import (
+    FACTUAL_GUARD_REQUIRED_EXTRA_KEY,
+    FACTUAL_TRUSTED_SOURCES_EXTRA_KEY,
+    REPLY_POLICY_ENABLED_EXTRA_KEY,
+    build_factual_evidence_prompt,
+)
 from astrbot.core.skills.skill_manager import (
     SkillInfo,
     SkillManager,
@@ -91,6 +108,7 @@ from astrbot.core.tools.web_search_tools import (
     FirecrawlWebSearchTool,
     TavilyExtractWebPageTool,
     TavilyWebSearchTool,
+    collect_exa_factual_evidence,
     normalize_legacy_web_search_config,
 )
 from astrbot.core.utils.astrbot_path import (
@@ -144,6 +162,23 @@ WEB_SEARCH_CITATION_PROMPT = (
     "Index is a unique identifier for each search result. "
     "Use the exact citation format <ref>index</ref> (e.g. <ref>abcd.3</ref>) "
     "after the sentence that uses the information. Do not invent citations."
+)
+WEB_SEARCH_LINK_PROMPT = (
+    "When you use web search results in a non-webchat reply, include a final "
+    "`来源：` section with one to three direct source URLs. Attribute claims only "
+    "to URLs returned by the search tools; do not invent links."
+)
+FORCED_WEB_RESEARCH_PROMPT = (
+    "The user explicitly requested external research. Before answering, use the "
+    "available web-search tool, inspect the relevant returned sources, and base "
+    "the answer on those sources rather than memory alone."
+)
+FACTUAL_REPLY_POLICY_PROMPT = (
+    "This deployment verifies factual replies before sending them. For factual "
+    "claims, rely only on the verified_web_evidence supplied with this request. "
+    "Do not fill gaps from memory, previous assistant messages, or unverified "
+    "social posts. If the evidence is insufficient, answer cautiously and make "
+    "the uncertainty explicit rather than asserting unsupported specifics."
 )
 
 
@@ -977,6 +1012,7 @@ async def _decorate_llm_request(
     cfg = config.provider_settings or plugin_context.get_config(
         umo=event.unified_msg_origin
     ).get("provider_settings", {})
+    cfg = {**cfg, "computer_use_runtime": config.computer_use_runtime}
 
     _apply_prompt_prefix(req, cfg)
 
@@ -1218,6 +1254,14 @@ async def _apply_web_search_tools(
 
     if not prov_settings.get("web_search", False):
         return
+    if prov_settings.get("verified_factual_reply_policy", False):
+        intent_route = event.get_extra("_intent_route")
+        force_external_research = event.get_extra("_force_external_research", False)
+        if (
+            not force_external_research
+            and intent_route != IntentRoute.EXTERNAL_FACT.value
+        ):
+            return
 
     if req.func_tool is None:
         req.func_tool = ToolSet()
@@ -1245,17 +1289,164 @@ def _apply_web_search_citation_prompt(
     event: AstrMessageEvent,
     req: ProviderRequest,
 ) -> None:
-    if event.get_platform_name() != "webchat" or not req.func_tool:
+    if not req.func_tool:
         return
 
     if not any(req.func_tool.get_tool(name) for name in WEB_SEARCH_CITATION_TOOL_NAMES):
         return
 
+    prompt = (
+        WEB_SEARCH_CITATION_PROMPT
+        if event.get_platform_name() == "webchat"
+        else WEB_SEARCH_LINK_PROMPT
+    )
     system_prompt = req.system_prompt or ""
-    if WEB_SEARCH_CITATION_PROMPT in system_prompt:
+    if prompt in system_prompt:
         return
 
-    req.system_prompt = f"{system_prompt}\n{WEB_SEARCH_CITATION_PROMPT}\n"
+    req.system_prompt = f"{system_prompt}\n{prompt}\n"
+
+
+def _apply_forced_web_search_prompt(
+    event: AstrMessageEvent,
+    req: ProviderRequest,
+) -> None:
+    """Require a search-tool pass for the explicit /research command."""
+    if not event.get_extra("_force_external_research", False):
+        return
+    system_prompt = req.system_prompt or ""
+    if FORCED_WEB_RESEARCH_PROMPT not in system_prompt:
+        req.system_prompt = f"{system_prompt}\n{FORCED_WEB_RESEARCH_PROMPT}\n"
+
+
+async def _apply_verified_factual_reply_policy(
+    event: AstrMessageEvent,
+    req: ProviderRequest,
+    plugin_context: Context,
+    provider: Provider,
+) -> None:
+    """Route reply evidence without relying on lexical intent heuristics."""
+    cfg = plugin_context.get_config(umo=event.unified_msg_origin)
+    normalize_legacy_web_search_config(cfg)
+    provider_settings = cfg.get("provider_settings", {})
+    if not provider_settings.get("verified_factual_reply_policy", False):
+        return
+
+    event.set_extra(REPLY_POLICY_ENABLED_EXTRA_KEY, True)
+    route_provider = provider
+    configured_router_id = str(
+        provider_settings.get("intent_router_provider_id", "")
+    ).strip()
+    if configured_router_id:
+        configured_provider = plugin_context.get_provider_by_id(configured_router_id)
+        if isinstance(configured_provider, Provider):
+            route_provider = configured_provider
+        else:
+            logger.warning(
+                "Configured intent router provider %s is unavailable; using the active chat provider.",
+                configured_router_id,
+            )
+
+    if provider_settings.get("intent_router_enabled", False):
+        decision = await classify_intent(route_provider, req.prompt)
+    else:
+        logger.warning(
+            "Verified reply policy is enabled without the structured intent router; using external-fact fallback."
+        )
+        decision = IntentDecision(
+            route=IntentRoute.EXTERNAL_FACT,
+            confidence=0.0,
+            is_fallback=True,
+        )
+
+    event.set_extra("_intent_route", decision.route.value)
+    event.set_extra("_intent_router_fallback", decision.is_fallback)
+    logger.info(
+        "Structured intent route selected: route=%s confidence=%.2f fallback=%s",
+        decision.route.value,
+        decision.confidence,
+        decision.is_fallback,
+    )
+    if decision.route in {IntentRoute.LOCAL_SYSTEM, IntentRoute.TECHNICAL_CONCEPT}:
+        evidence_blocks: list[str] = []
+        source_types: list[str] = []
+        if decision.route is IntentRoute.LOCAL_SYSTEM:
+            evidence_blocks.append(build_runtime_config_evidence(provider_settings))
+            source_types.append("local_config")
+        recent_user_messages = _get_recent_user_messages(req)
+        active_entries = activate_lorebook(load_lorebook(), recent_user_messages)
+        if active_entries:
+            evidence_blocks.append(build_local_evidence_prompt(active_entries))
+            source_types.extend(entry.source_type for entry in active_entries)
+        if evidence_blocks:
+            req.extra_user_content_parts.append(
+                TextPart(text="\n\n".join(evidence_blocks))
+            )
+            event.set_extra(
+                "_local_evidence_source_types",
+                list(dict.fromkeys(source_types)),
+            )
+        return
+    if decision.route is IntentRoute.CHAT_CREATIVE:
+        return
+
+    event.set_extra(FACTUAL_GUARD_REQUIRED_EXTRA_KEY, True)
+    trusted_sources: list[dict[str, str]] = []
+    if (
+        provider_settings.get("web_search", False)
+        and provider_settings.get("websearch_provider") == "exa"
+    ):
+        trusted_sources, _ = await collect_exa_factual_evidence(
+            provider_settings,
+            req.prompt,
+        )
+    event.set_extra(FACTUAL_TRUSTED_SOURCES_EXTRA_KEY, trusted_sources)
+
+    req.system_prompt = f"{req.system_prompt or ''}\n{FACTUAL_REPLY_POLICY_PROMPT}\n"
+    if trusted_sources:
+        req.extra_user_content_parts.append(
+            TextPart(text=build_factual_evidence_prompt(trusted_sources))
+        )
+    else:
+        req.extra_user_content_parts.append(
+            TextPart(
+                text=(
+                    "<verified_web_evidence>There are no verified trusted sources "
+                    "for this request. You may answer cautiously, but do not state "
+                    "unsupported factual details as certain."
+                    "</verified_web_evidence>"
+                )
+            )
+        )
+
+
+def _get_recent_user_messages(req: ProviderRequest, max_messages: int = 5) -> list[str]:
+    """Extract a small, text-only window for non-recursive Lorebook matching."""
+    messages: list[str] = []
+    for context_message in reversed(req.contexts or []):
+        if not isinstance(context_message, dict):
+            continue
+        if context_message.get("role") != "user":
+            continue
+        content = context_message.get("content")
+        if isinstance(content, str):
+            text = content.strip()
+        elif isinstance(content, list):
+            text = "\n".join(
+                str(part.get("text", "")).strip()
+                for part in content
+                if isinstance(part, dict) and part.get("type") == "text"
+            ).strip()
+        else:
+            text = ""
+        if text:
+            messages.append(text)
+        if len(messages) >= max_messages - 1:
+            break
+    messages.reverse()
+    if req.prompt and req.prompt.strip():
+        messages.append(req.prompt.strip())
+    return messages[-max_messages:]
 
 
 def _get_compress_provider(
@@ -1555,6 +1746,7 @@ async def build_main_agent(
         req.session_id = event.unified_msg_origin
 
     _plugin_tool_fix(event, req)
+    await _apply_verified_factual_reply_policy(event, req, plugin_context, provider)
     await _apply_web_search_tools(event, req, plugin_context)
 
     if config.llm_safety_mode:
@@ -1634,6 +1826,7 @@ async def build_main_agent(
         req.system_prompt += f"\n{LIVE_MODE_SYSTEM_PROMPT}\n"
 
     _apply_web_search_citation_prompt(event, req)
+    _apply_forced_web_search_prompt(event, req)
 
     reset_coro = agent_runner.reset(
         provider=provider,

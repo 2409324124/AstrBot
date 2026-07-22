@@ -1,12 +1,12 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import col, desc
 
 from astrbot.core import logger
+from astrbot.core.db.vec_db.base import BaseVecDB
 from astrbot.core.knowledge_base.models import (
     BaseKBModel,
     KBDocument,
@@ -14,9 +14,6 @@ from astrbot.core.knowledge_base.models import (
     KnowledgeBase,
 )
 from astrbot.core.utils.astrbot_path import get_astrbot_knowledge_base_path
-
-if TYPE_CHECKING:
-    from astrbot.core.db.vec_db.faiss_impl import FaissVecDB
 
 
 class KBSQLiteDatabase:
@@ -319,7 +316,7 @@ class KBSQLiteDatabase:
 
         return metadata_map
 
-    async def delete_document_by_id(self, doc_id: str, vec_db: "FaissVecDB") -> None:
+    async def delete_document_by_id(self, doc_id: str, vec_db: BaseVecDB) -> None:
         """删除单个文档及其相关数据（包括多媒体记录）"""
         async with self.get_db() as session, session.begin():
             # 删除多媒体记录
@@ -349,7 +346,7 @@ class KBSQLiteDatabase:
             result = await session.execute(stmt)
             return result.scalar_one_or_none()
 
-    async def update_kb_stats(self, kb_id: str, vec_db: "FaissVecDB") -> None:
+    async def update_kb_stats(self, kb_id: str, vec_db: BaseVecDB) -> None:
         """更新知识库统计信息"""
         chunk_cnt = await vec_db.count_documents(metadata_filter={"kb_id": kb_id})
 
