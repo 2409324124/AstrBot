@@ -146,3 +146,10 @@
 - 逐文件通过：intent router 13、response policy 16、KB retrieval layers 3、KB resilience 5、web search 25、RAG scripts 18，以及本次 QQ 相关 30 项。
 - Qdrant 的内存测试和仓库原有 DocumentStorage FTS 测试均卡在 `.venv` 的最小 `aiosqlite.connect(":memory:")`；独立 10 秒探针同样超时，确认是本地依赖环境限制，留待远端 AstrBot 容器验证。
 - 已创建首个版本控制提交 `6a0d9c5 feat: add local RAG and evidence-aware routing`。
+- 创建并推送第二个提交 `83f8ae1 fix: honor QQ account-owner takeover` 到 `fork/feature/local-rag-qdrant`。
+- 远端先保存二进制 diff 和状态，再创建 `stash@{0}: pre-human-takeover-20260722T182817Z`；通过 4.0 MiB Git bundle 离线快进到 `83f8ae1`，避免代理问题和破坏性 reset。
+- 远端源码部署前备份位于 `/home/miku/astrbot-deploy/backups/human-takeover-20260722T182817Z`；root 配置备份位于 `/home/miku/astrbot-deploy/backups/human-takeover-runtime-20260722T182933Z`，权限 0600/0700。
+- AstrBot Dashboard API 已增量加入 `东云bot`、`东云Bot`、`东云BOT`；NapCat WebUI API 已把启用的 `astrbot` WebSocket Client 更新为 `reportSelfMessage=true` 并二次读取验证。
+- 只重启 AstrBot；NapCat、Qdrant、Embedding 均保持原运行时长，QQ 登录容器未重启。AstrBot 重新启动并连接 OneBot 适配器，启动错误计数为 0。
+- 远端容器内回归：Qdrant 4/4、QQ 接管 30/30 通过；远端 Git HEAD 为 `83f8ae1` 且工作树 clean。
+- 剩余验收仅是用户侧真实 QQ 烟测：号主先发普通消息、同群成员 @ Bot 应不回复；号主引用该问题发送“让bot回答这个问题”后应回复；其他群不应受影响。

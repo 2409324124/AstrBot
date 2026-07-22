@@ -123,3 +123,11 @@
 - 自然交还不能只靠正文：要求自身人工标记 + Reply 组件 + 有限自然短语三项同时满足，避免普通群友或无引用消息把 Bot 重新拉进对话。
 - 即便全局 `ignore_bot_self_message=true`，适配器已确认的人工作者消息也必须保留；未标记自身消息仍按原设置过滤。
 - NapCat 官方当前 WebUI 实现要求 `POST /api/OB11Config/GetConfig`，写入体为 `{config: JSON.stringify(config)}`；`setOB11Config()` 会保存并按网络适配器差异热重载，无需重启 QQ/NapCat。
+
+## 号主人工接管部署结果（2026-07-23）
+
+- 远端分支通过本地 Git bundle 从 `ad97724` 快进到 `83f8ae1`；原部署改动完整保存在命名 stash 和时间戳 patch 中，未使用破坏性 reset。
+- 生效配置为：活动 `astrbot` WebSocket Client 的 `reportSelfMessage=true`、`human_takeover_seconds=900.0`，并保留三种 `东云bot` 大小写唤醒词。
+- NapCat 未重启；仅 AstrBot 重启并重新建立 OneBot WebSocket，Qdrant 与 Embedding 运行时长未变化。
+- 生产容器使用的依赖环境中，Qdrant 内存测试 4/4、号主接管相关测试 30/30 通过；启动后精确错误计数为 0。
+- 代码无法判断号主“只在线但没发言”；900 秒窗口从号主实际群消息开始。这一协议边界仍成立。

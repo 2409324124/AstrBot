@@ -79,8 +79,9 @@
 - [x] RED→GREEN：仅号主引用消息可用自然交还口令让 Bot 接管
 - [x] RED→GREEN：`ignore_bot_self_message` 开启时仍保留已标记的号主人工消息
 - [x] 增量加入 `东云bot` 大小写唤醒词，保留并可恢复原配置
-- [ ] 通过 NapCat WebUI API 热开启活动 WebSocket Client 的自身消息上报
-- [ ] 远端备份、部署、日志核验与真实 QQ 烟测
+- [x] 通过 NapCat WebUI API 热开启活动 WebSocket Client 的自身消息上报
+- [x] 远端备份、分支快进、仅 AstrBot 重启与容器内回归
+- [ ] 真实 QQ 烟测：号主发言、同群 @ 抑制、引用交还、跨群隔离
 - **状态：** in_progress
 
 ## 已做决策
@@ -126,8 +127,13 @@
 | 大测试矩阵卡在未初始化的全局知识库会话存储 | 2 | 为 Agent 构建测试隔离 KB，专门 KB 测试保持原覆盖；`test_astr_main_agent.py` 104/104 通过。 |
 | 本机 `.venv` 的 `aiosqlite 0.22.1` 最小内存连接也超时 | 1 | Qdrant/原有 FTS 测试均受影响；不误报为 Qdrant 代码失败，转到远端运行容器验证。 |
 | worktree Git 元数据位于只读的 `/srv/storage` | 1 | 首次暂存未执行；经用户已授权的 Git 写权限成功创建逻辑提交。 |
+| root 0700 备份目录无法由普通 shell 展开 `*.json` | 1 | 三个备份已成功；通配 chmod 失败后会话退出，重新进入并改用显式文件名。 |
+| `sudo python3` 看不到用户级 `httpx` | 1 | 脚本在 import 前停止、配置未变；随后只继承现有用户 site-packages 路径执行成功。 |
+| 首次 Compose 路径只包含 NapCat，无 AstrBot 服务 | 1 | 命令无目标且未重启任何容器；从容器标签读取真实 Compose 路径后仅重启 AstrBot。 |
+| 一次延迟的未过滤日志输出包含无关群聊正文 | 1 | 不保存到审计文档；后续只输出启动行或错误计数，不再读取原始日志正文。 |
 
 ## 备注
 
 - 规划、发现和测试结果分别写入 `task_plan.md`、`findings.md` 与 `progress.md`。
 - 不在这些文件中记录 API Key、私聊文本或 QQ 登录状态。
+- 阶段 8 代码与部署已完成；最终状态暂留 `in_progress`，等待用户侧真实 QQ 发言烟测。
