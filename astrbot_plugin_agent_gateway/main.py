@@ -28,6 +28,7 @@ class Main(star.Star):
         self.client = GatewayClient(
             os.environ.get("AGENT_GATEWAY_URL", "http://agent-gateway:8090"),
             os.environ.get("AGENT_GATEWAY_TOKEN", "disabled"),
+            os.environ.get("AGENT_GATEWAY_ADMIN_TOKEN", "disabled"),
         )
         try:
             self.group_context = GroupChatContext(
@@ -47,10 +48,25 @@ class Main(star.Star):
         if not self.enabled:
             return
         normalized = event.message_str.strip()
-        if normalized.lstrip("/").startswith(("astrbot切换", "bot切换")):
-            return
 
         message_type = event.get_message_type()
+        if self._is_admin_command(normalized):
+            if message_type != MessageType.FRIEND_MESSAGE or not event.is_admin():
+                event.should_call_llm(False)
+                event.stop_event()
+                return
+            try:
+                response = await self._handle_admin_command(normalized)
+            except Exception as exc:
+                logger.warning(
+                    "Agent gateway admin command failed: error_type=%s",
+                    type(exc).__name__,
+                )
+                response = "切换失败，请检查命令和 Gateway 状态"
+            await event.send(MessageChain().message(f"{response}（ai生成内容）"))
+            event.should_call_llm(False)
+            event.stop_event()
+            return
         if message_type == MessageType.FRIEND_MESSAGE and not event.is_admin():
             event.should_call_llm(False)
             event.stop_event()
@@ -137,6 +153,51 @@ class Main(star.Star):
                 await event.send(MessageChain().message("\n".join(texts)))
         event.should_call_llm(False)
         event.stop_event()
+
+    @staticmethod
+    def _is_admin_command(text: str) -> bool:
+        """Recognize the scoped private admin command prefix."""
+        normalized = text.lstrip("-/ ")
+        return normalized.startswith(("astrbot切换", "bot切换"))
+
+    async def _handle_admin_command(self, text: str) -> str:
+        """Apply one model or group whitelist change through the Gateway API."""
+        normalized = text.lstrip("-/ ")
+        for prefix in ("astrbot切换", "bot切换"):
+            if normalized.startswith(prefix):
+                normalized = normalized[len(prefix) :].strip(" -/")
+                break
+        config = await self.client.get_admin_config()
+        parts = normalized.split()
+        if not parts or parts[0] in {"状态", "查看"}:
+            groups = "、".join(config["group_whitelist"]) or "无"
+            return f"模型：{config['model']}\n群白名单：{groups}"
+        if len(parts) == 2 and parts[0] in {"模型", "切换模型"}:
+            model = parts[1]
+            if len(model) > 128:
+                raise ValueError("model name is too long")
+            config["model"] = model
+            await self.client.update_admin_config(config)
+            return f"已切换模型：{model}"
+        if parts and parts[0] in {"白名单", "切换白名单"}:
+            if len(parts) == 2 and parts[1] in {"列表", "查看"}:
+                groups = "、".join(config["group_whitelist"]) or "无"
+                return f"群白名单：{groups}"
+            if (
+                len(parts) == 3
+                and parts[1] in {"添加", "删除"}
+                and parts[2].isdigit()
+            ):
+                action, group_id = parts[1], parts[2]
+                groups = list(dict.fromkeys(config["group_whitelist"]))
+                if action == "添加" and group_id not in groups:
+                    groups.append(group_id)
+                if action == "删除":
+                    groups = [group for group in groups if group != group_id]
+                config["group_whitelist"] = groups
+                await self.client.update_admin_config(config)
+                return f"已{action}群：{group_id}"
+        return "用法：-astrbot切换 状态 | 模型 <ID> | 白名单 添加/删除 <群号>"
 
     async def terminate(self) -> None:
         """Release the Gateway HTTP pool when the plugin unloads."""

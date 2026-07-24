@@ -139,3 +139,77 @@ test("idempotency survives a gateway process restart", async () => {
   secondStore.close();
   await rm(directory, { recursive: true, force: true });
 });
+
+test("admin API atomically updates the active model and group whitelist", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "agent-gateway-admin-"));
+  const store = new SqliteGatewayStore(join(directory, "gateway.sqlite3"));
+  const models = [];
+  const app = createApp({
+    eventToken: "event-secret",
+    adminToken: "admin-secret",
+    handleEvent: async () => ({ action: "reply", messages: [], reason_code: "called" }),
+    decisionStore: store,
+    adminStore: store,
+    initialAdminConfig: { model: "deepseek-v4-pro", groupWhitelist: ["709694410"] },
+    onModelChange: async (model) => models.push(model)
+  });
+
+  const unauthorized = await app.inject({ method: "GET", url: "/v1/admin/config" });
+  assert.equal(unauthorized.statusCode, 401);
+
+  const changed = await app.inject({
+    method: "PATCH",
+    url: "/v1/admin/config",
+    headers: { authorization: "Bearer admin-secret" },
+    payload: {
+      model: "qwen3.5-27b-local",
+      group_whitelist: ["709694410", "89589336", "709694410"]
+    }
+  });
+  assert.equal(changed.statusCode, 200);
+  assert.deepEqual(changed.json(), {
+    model: "qwen3.5-27b-local",
+    group_whitelist: ["709694410", "89589336"]
+  });
+  assert.deepEqual(models, ["qwen3.5-27b-local"]);
+
+  const outside = await app.inject({
+    method: "POST",
+    url: "/v1/events",
+    headers: { authorization: "Bearer event-secret" },
+    payload: {
+      ...event,
+      message_id: "outside-group",
+      chat_type: "group",
+      group_id: "1043304585"
+    }
+  });
+  assert.equal(outside.json().action, "no_reply");
+  assert.equal(outside.json().reason_code, "group_not_whitelisted");
+
+  store.close();
+  await app.close();
+  await rm(directory, { recursive: true, force: true });
+});
+
+test("event API rejects malformed payloads before calling the agent", async () => {
+  let calls = 0;
+  const app = createApp({
+    eventToken: "event-secret",
+    handleEvent: async () => {
+      calls += 1;
+      return { action: "reply", messages: [], reason_code: "called" };
+    }
+  });
+
+  const response = await app.inject({
+    method: "POST",
+    url: "/v1/events",
+    headers: { authorization: "Bearer event-secret" },
+    payload: { ...event, message_id: "", text: 42 }
+  });
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(calls, 0);
+  await app.close();
+});

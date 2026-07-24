@@ -13,6 +13,11 @@
 - 已安装并直接检查 `@earendil-works/pi-agent-core@0.82.0` / `pi-ai@0.82.0` 类型定义：当前入口为 `Agent`、`createModels()`、`createProvider()`，OpenAI-compatible 使用 `openai-completions` API；不使用待移除的 compat 包。
 - Node 22.19 的 `node:sqlite` 可用但仍打印实验性警告；服务将通过存储接口隔离实现，不让 SQLite 细节进入事件路由。
 - `@qdrant/js-client-rest@1.18.0` 提供 Universal Query 的 `prefetch` 与 `query`，可直接表达 dense + sparse + RRF。
+- 首次真实 Gateway RAG 端到端回答命中正确内容，但证据脚注为 `unknown`。旧 Qdrant payload 只有 `kb_doc_id`，真实文件名位于 AstrBot `knowledge_base/kb.db` 的 `kb_documents(doc_id, doc_name)`。
+- 迁移器现以 SQLite `mode=ro` 加载文档目录，用 `kb_doc_id` 补全 `source`；点 ID 仍由原集合与原点 ID 确定性生成，因此重跑只会幂等更新 payload，不会新增重复点。
+- Gateway 管理面必须与事件面使用不同 Bearer token；管理员私聊只提交模型 ID 和群号，不在 QQ 消息或 SQLite 中传递 LLM API Key。
+- 群白名单在 Gateway 事件入口、幂等命中后且 RAG/LLM 之前判断；这使被移除的群不会消耗 embedding 或对话 token。
+- 会话记忆以 UMO 为键持久化，同一群/私聊串行处理；较旧交换滚入有界历史摘要，最近交换保留，且按上下文窗口为输出、系统提示和 RAG 证据预留空间。
 
 ## 需求
 

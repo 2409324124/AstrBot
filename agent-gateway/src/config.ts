@@ -14,11 +14,23 @@ export type GatewayConfig = {
   llmBaseUrl: string;
   llmApiKey: string;
   llmModel: string;
+  groupWhitelist: string[];
   contextWindow: number;
   maxOutputTokens: number;
   ragEvidenceThreshold: number;
   agentTimeoutMs: number;
 };
+
+function groupWhitelist(env: NodeJS.ProcessEnv): string[] {
+  const groups = (env.GROUP_WHITELIST ?? "")
+    .split(",")
+    .map((group) => group.trim())
+    .filter(Boolean);
+  if (groups.some((group) => !/^\d{5,20}$/u.test(group))) {
+    throw new Error("GROUP_WHITELIST must contain comma-separated group IDs");
+  }
+  return [...new Set(groups)];
+}
 
 function required(env: NodeJS.ProcessEnv, name: string): string {
   const value = env[name]?.trim();
@@ -65,6 +77,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): GatewayConfig {
     llmBaseUrl: required(env, "LLM_BASE_URL"),
     llmApiKey: required(env, "LLM_API_KEY"),
     llmModel: required(env, "LLM_MODEL"),
+    groupWhitelist: groupWhitelist(env),
     contextWindow: boundedNumber(env, "CONTEXT_WINDOW", 16384, 4096, 1000000),
     maxOutputTokens: boundedNumber(
       env,

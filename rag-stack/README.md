@@ -12,8 +12,27 @@ AstrBot
   └── Qdrant collection per knowledge base: 1024-d cosine vectors
 ```
 
-The online chat LLM provider is unchanged. The vector backend defaults to FAISS
-until the final cutover.
+The online chat LLM provider is unchanged during sidecar deployment. After the
+independent Gateway passes acceptance, AstrBot can be reduced to QQ transport;
+see `../agent-gateway/README.md`. Keep `AGENT_GATEWAY_ENABLED=false` until that
+cutover.
+
+The independent collection migration is additive and idempotent:
+
+```bash
+sudo docker exec astrbot python \
+  /AstrBot/rag-stack/scripts/migrate_agent_rag_v1.py \
+  --target agent_rag_v1 --batch-size 128
+
+sudo docker exec astrbot python \
+  /AstrBot/rag-stack/scripts/verify_agent_rag.py \
+  --collection agent_rag_v1 --top-k 8
+```
+
+The migration reads `kb.db` in SQLite read-only mode to resolve document names,
+upserts deterministic point IDs, and never deletes the old AstrBot collections.
+The verifier runs all 31 tracked retrieval cases through the same BGE-M3 +
+Qdrant dense/BM25/RRF request shape as the Gateway and prints no retrieved text.
 
 ## External research and group behavior
 

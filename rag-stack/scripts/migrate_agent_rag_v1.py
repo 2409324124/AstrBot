@@ -5,18 +5,25 @@ import argparse
 import asyncio
 import json
 import os
+import sqlite3
 import uuid
+from pathlib import Path
 from typing import Any
 
 from qdrant_client import AsyncQdrantClient, models
 
 
-def canonical_payload(kb_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+def canonical_payload(
+    kb_id: str,
+    payload: dict[str, Any],
+    document_names: dict[str, str] | None = None,
+) -> dict[str, Any]:
     """Flatten query-critical fields while retaining original metadata.
 
     Args:
         kb_id: Source AstrBot knowledge-base identifier.
         payload: Existing Qdrant point payload.
+        document_names: Optional document ID to display name catalog.
 
     Returns:
         Canonical payload for ``agent_rag_v1``.
@@ -26,10 +33,12 @@ def canonical_payload(kb_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         metadata = {}
     chunk_id = str(payload.get("doc_id") or metadata.get("chunk_id") or "")
     doc_id = str(metadata.get("kb_doc_id") or metadata.get("doc_id") or chunk_id)
+    document_names = document_names or {}
     source = str(
         metadata.get("file_name")
         or metadata.get("source")
         or metadata.get("doc_name")
+        or document_names.get(doc_id)
         or "unknown"
     )
     result = {
@@ -43,6 +52,29 @@ def canonical_payload(kb_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     if "chunk_index" in metadata:
         result["chunk_index"] = metadata["chunk_index"]
     return result
+
+
+def load_document_names(path: Path) -> dict[str, str]:
+    """Read the AstrBot document catalog without modifying it.
+
+    Args:
+        path: Knowledge-base catalog SQLite file.
+
+    Returns:
+        Document IDs mapped to display names.
+    """
+    if not path.is_file():
+        return {}
+    connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    try:
+        return {
+            str(doc_id): str(doc_name)
+            for doc_id, doc_name in connection.execute(
+                "SELECT doc_id, doc_name FROM kb_documents"
+            )
+        }
+    finally:
+        connection.close()
 
 
 async def main() -> int:
@@ -63,6 +95,10 @@ async def main() -> int:
         timeout=120,
     )
     migrated = 0
+    knowledge_root = Path(
+        os.environ.get("ASTRBOT_KB_ROOT", "/AstrBot/data/knowledge_base")
+    )
+    document_names = load_document_names(knowledge_root / "kb.db")
     try:
         collections = await client.get_collections()
         sources = sorted(
@@ -111,7 +147,11 @@ async def main() -> int:
                 )
                 points = []
                 for record in records:
-                    payload = canonical_payload(kb_id, record.payload or {})
+                    payload = canonical_payload(
+                        kb_id,
+                        record.payload or {},
+                        document_names,
+                    )
                     dense = record.vector
                     if isinstance(dense, dict):
                         dense = dense.get("dense")

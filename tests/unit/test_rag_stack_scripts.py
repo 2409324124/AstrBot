@@ -77,6 +77,53 @@ def test_v1_migration_flattens_payload_without_losing_source_metadata() -> None:
     }
 
 
+def test_v1_migration_resolves_document_name_from_read_only_catalog() -> None:
+    module = load_script("migrate_agent_rag_v1.py")
+
+    payload = module.canonical_payload(
+        "kb-server",
+        {
+            "doc_id": "chunk-1",
+            "text": "Xeon Max 9470C",
+            "metadata": {"kb_doc_id": "document-1", "chunk_index": 4},
+        },
+        {"document-1": "server.md"},
+    )
+
+    assert payload["source"] == "server.md"
+
+
+def test_agent_rag_acceptance_requires_document_and_every_term_group() -> None:
+    module = load_script("verify_agent_rag.py")
+    case = {
+        "expected_documents": ["server.md"],
+        "required_term_groups": [["9470C"], ["52 核", "52核"]],
+    }
+    hits = [
+        {"source": "server.md", "text": "Xeon Max 9470C 拥有 52 核。"},
+        {"source": "other.md", "text": "其他内容"},
+    ]
+
+    result = module.evaluate_case(case, hits)
+
+    assert result == {"document_match": True, "missing_term_groups": []}
+
+
+def test_agent_rag_acceptance_reports_missing_evidence_without_text_leak() -> None:
+    module = load_script("verify_agent_rag.py")
+    case = {
+        "expected_documents": ["server.md"],
+        "required_term_groups": [["9470C"], ["64GB HBM2"]],
+    }
+
+    result = module.evaluate_case(
+        case,
+        [{"source": "wrong.md", "text": "9470C"}],
+    )
+
+    assert result == {"document_match": False, "missing_term_groups": [1]}
+
+
 def test_backend_switch_is_atomic_and_keeps_backup(tmp_path) -> None:
     """Cutover updates only the backend setting and preserves the old env file."""
     env_file = tmp_path / ".env"

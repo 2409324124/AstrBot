@@ -237,3 +237,23 @@
 | 2026-07-24 | 远端普通用户无法创建 PM983 Gateway 目录 | 1 | 使用已授权 sudo 创建并归属 UID 1000，未改变其他目录。 |
 | 2026-07-24 | 远端 Docker Hub token 请求超时 | 1 | 不重复远端拉取；离线传输本机已验证的 125MB 镜像并成功加载。 |
 | 2026-07-24 | 通用 backup.sh 使用错误 Compose 视图误报 AstrBot 未运行 | 1 | 未停止服务；直接在运行中的 AstrBot 容器执行同一 backup_state.py，快照成功。 |
+| 2026-07-24 | 真实 RAG 证据脚注显示 `unknown` | 1 | 确认向量 payload 只保存 `kb_doc_id`；迁移器改为只读查询 AstrBot `kb.db` 并幂等回填文档名。 |
+| 2026-07-24 | 在仓库根目录运行 Gateway `npm` 检查 | 1 | Python/Ruff 已通过；Node 任务改到 `agent-gateway/` 目录单独执行，不再重复根目录命令。 |
+| 2026-07-24 | Git 提交被平台审批额度拦截 | 1 | 未绕过审批；已测修复保留在工作树，继续本地可逆实现，等用户新授权后统一提交/同步。 |
+| 2026-07-24 | 本机不存在远端绝对路径的 AstrBot Compose 基底 | 1 | Gateway Compose 直接通过；AstrBot override 用最小临时基底验证后通过，临时文件已删除。 |
+
+## 2026-07-24：Gateway 管理面与会话记忆
+
+- RED→GREEN：新增独立管理鉴权的 `/v1/admin/config`，模型与群白名单原子更新并持久化到 SQLite。
+- RED→GREEN：群白名单在 RAG/LLM 前拒绝；QQ 管理员私聊支持状态、模型、白名单添加/删除命令。
+- RED→GREEN：无效事件 payload 返回 400，不调用 Agent。
+- RED→GREEN：新增按 UMO 持久化的会话记忆；超预算时将旧交换滚入有界摘要，保留最近对话，同一 UMO 串行处理。
+- Gateway 7 个 Node 测试文件和 TypeScript strict typecheck 通过；QQ 管理命令 3 项 Python 测试与 Ruff 通过。
+- RED→GREEN：当前用户消息超出输入预算时保留首尾并显式标记截断；最终 Agent prompt 硬限不超过预算。
+- RED→GREEN：新增 31 条历史检索验收器，请求结构与 Gateway 的 BGE-M3 + dense/BM25/RRF 完全一致，输出不包含召回正文。
+- 完整本地门禁：Node 7 个测试文件全过，TypeScript strict 通过，Python 25/25 通过，Ruff、两份 Compose 视图、diff-check 和秘密扫描通过。
+
+## 2026-07-25：提交、远端回归与切换
+
+- 用户确认平台额度已恢复，授权继续提交与后续部署。
+- 提交前状态复核：当前分支 `feature/local-rag-qdrant`，基线 `0e310fe`，工作树只包含计划内 Gateway/RAG/插件/文档与测试更改。

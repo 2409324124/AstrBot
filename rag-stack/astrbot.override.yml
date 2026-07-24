@@ -36,6 +36,7 @@ services:
       AGENT_GATEWAY_ENABLED: ${AGENT_GATEWAY_ENABLED:-false}
       AGENT_GATEWAY_URL: ${AGENT_GATEWAY_URL:-http://agent-gateway:8090}
       AGENT_GATEWAY_TOKEN: ${AGENT_GATEWAY_TOKEN:-disabled}
+      AGENT_GATEWAY_ADMIN_TOKEN: ${AGENT_GATEWAY_ADMIN_TOKEN:-disabled}
     volumes:
       # The base image does not contain this fork's source tree. Keep runtime
       # code aligned with the checked-out branch while compose.yml retains its

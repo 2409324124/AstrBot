@@ -11,12 +11,16 @@ import { createApp } from "./app.ts";
 import { loadConfig } from "./config.ts";
 import { ExaSearchClient } from "./exa.ts";
 import { GatewayAgent } from "./gateway-agent.ts";
+import { ConversationMemory } from "./memory.ts";
 import { PiAgentRuntime } from "./pi-runtime.ts";
 import { HybridRag, OpenAIEmbeddingClient } from "./rag.ts";
 import { SqliteGatewayStore } from "./store.ts";
 
 export function buildApp(env: NodeJS.ProcessEnv) {
   const config = loadConfig(env);
+  const store = new SqliteGatewayStore(config.databasePath);
+  const persistedAdminConfig = store.getAdminConfig();
+  const activeModelId = persistedAdminConfig?.model ?? config.llmModel;
   const embedding = new OpenAIEmbeddingClient({
     baseUrl: config.embeddingBaseUrl,
     apiKey: config.embeddingApiKey,
@@ -36,8 +40,8 @@ export function buildApp(env: NodeJS.ProcessEnv) {
     },
   });
   const model: Model<"openai-completions"> = {
-    id: config.llmModel,
-    name: config.llmModel,
+    id: activeModelId,
+    name: activeModelId,
     api: "openai-completions",
     provider: "gateway-openai-compatible",
     baseUrl: config.llmBaseUrl,
@@ -81,11 +85,30 @@ export function buildApp(env: NodeJS.ProcessEnv) {
     runtime,
     exa: new ExaSearchClient({ apiKey: config.exaApiKey }),
     evidenceThreshold: config.ragEvidenceThreshold,
+    memory: new ConversationMemory({
+      store,
+      tokenBudget: Math.max(
+        1024,
+        config.contextWindow - config.maxOutputTokens - 4096,
+      ),
+    }),
+    maxPromptTokens: Math.max(
+      1024,
+      config.contextWindow - config.maxOutputTokens - 1024,
+    ),
   });
-  const store = new SqliteGatewayStore(config.databasePath);
   const app = createApp({
     eventToken: config.eventToken,
+    adminToken: config.adminToken,
     decisionStore: store,
+    adminStore: store,
+    initialAdminConfig: {
+      model: config.llmModel,
+      groupWhitelist: config.groupWhitelist,
+    },
+    onModelChange: (modelId) => {
+      runtime.setModel({ ...model, id: modelId, name: modelId });
+    },
     handleEvent: gatewayAgent.handle.bind(gatewayAgent),
   });
   app.get("/healthz", async () => ({ status: "ok" }));

@@ -21,11 +21,18 @@ type ExaPort = {
   ) => Promise<ExaSearchResult[]>;
 };
 
+type MemoryPort = {
+  context: (sessionId: string) => string;
+  record: (sessionId: string, user: string, assistant: string) => void;
+};
+
 type GatewayAgentOptions = {
   rag: RagPort;
   runtime: RuntimePort;
   exa: ExaPort;
   evidenceThreshold: number;
+  memory?: MemoryPort;
+  maxPromptTokens?: number;
 };
 
 const SYSTEM_PROMPT = `你是东云bot。回答前已经执行了本地知识检索。
@@ -34,20 +41,69 @@ const SYSTEM_PROMPT = `你是东云bot。回答前已经执行了本地知识检
 普通闲聊尽量不超过20个中文字符；技术内容按需要完整回答。
 不要自行添加 AI 内容标记，网关会统一添加。`;
 
+function length(text: string): number {
+  return [...text].length;
+}
+
+function clipMiddle(text: string, limit: number): string {
+  if (length(text) <= limit) {
+    return text;
+  }
+  const marker = "\n[...内容已截断...]\n";
+  const available = Math.max(0, limit - length(marker));
+  const start = Math.ceil(available / 2);
+  const end = Math.floor(available / 2);
+  const points = [...text];
+  return `${points.slice(0, start).join("")}${marker}${
+    end ? points.slice(-end).join("") : ""
+  }`;
+}
+
+function head(text: string, limit: number): string {
+  return [...text].slice(0, Math.max(0, limit)).join("");
+}
+
+function tail(text: string, limit: number): string {
+  const points = [...text];
+  return points.slice(Math.max(0, points.length - limit)).join("");
+}
+
 export class GatewayAgent {
   readonly #rag: RagPort;
   readonly #runtime: RuntimePort;
   readonly #exa: ExaPort;
   readonly #evidenceThreshold: number;
+  readonly #memory: MemoryPort | undefined;
+  readonly #maxPromptTokens: number;
+  readonly #sessionQueues = new Map<string, Promise<void>>();
 
   constructor(options: GatewayAgentOptions) {
     this.#rag = options.rag;
     this.#runtime = options.runtime;
     this.#exa = options.exa;
     this.#evidenceThreshold = options.evidenceThreshold;
+    this.#memory = options.memory;
+    this.#maxPromptTokens = options.maxPromptTokens ?? 12288;
   }
 
   async handle(event: GatewayEvent): Promise<GatewayDecision> {
+    const previous = this.#sessionQueues.get(event.umo) ?? Promise.resolve();
+    const run = previous.then(async () => await this.#handleSerial(event));
+    const tail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.#sessionQueues.set(event.umo, tail);
+    try {
+      return await run;
+    } finally {
+      if (this.#sessionQueues.get(event.umo) === tail) {
+        this.#sessionQueues.delete(event.umo);
+      }
+    }
+  }
+
+  async #handleSerial(event: GatewayEvent): Promise<GatewayDecision> {
     const initialHits = await this.#rag.search(event.text, { topK: 8 });
     const evidence = initialHits.filter(
       (hit) => hit.score >= this.#evidenceThreshold,
@@ -123,10 +179,37 @@ export class GatewayAgent {
           )
           .join("\n\n")
       : "[本地证据] 未检索到达到阈值的内容。";
+    const memory = this.#memory?.context(event.umo) ?? "";
+    const questionLabel = "[用户问题]\n";
+    const questionBudget = Math.max(
+      length(questionLabel),
+      Math.floor(this.#maxPromptTokens * 0.6),
+    );
+    const questionBlock = `${questionLabel}${clipMiddle(
+      event.text,
+      questionBudget - length(questionLabel),
+    )}`;
+    let remaining = this.#maxPromptTokens - length(questionBlock);
+    const memoryCandidate = memory ? `[对话记忆]\n${memory}` : "";
+    const memoryLimit = Math.min(
+      Math.floor(this.#maxPromptTokens * 0.25),
+      Math.max(0, remaining - 2),
+    );
+    const boundedMemory = memoryCandidate
+      ? tail(memoryCandidate, memoryLimit)
+      : "";
+    remaining -= boundedMemory ? length(boundedMemory) + 2 : 0;
+    const boundedEvidence = head(
+      evidenceBlock,
+      Math.max(0, remaining - (remaining > 2 ? 2 : 0)),
+    );
+    const prompt = [boundedMemory, boundedEvidence, questionBlock]
+      .filter(Boolean)
+      .join("\n\n");
     const result = await this.#runtime.run({
       sessionId: event.umo,
       systemPrompt: SYSTEM_PROMPT,
-      prompt: `${evidenceBlock}\n\n[用户问题]\n${event.text}`,
+      prompt,
       tools: [ragTool, webTool],
     });
     const text = result.text
@@ -135,7 +218,14 @@ export class GatewayAgent {
     if (!text) {
       return { action: "no_reply", messages: [], reason_code: "empty_agent_reply" };
     }
-    const sources = [...new Set(evidence.map((hit) => hit.source))];
+    this.#memory?.record(event.umo, event.text, text);
+    const sources = [
+      ...new Set(
+        evidence
+          .filter((hit) => boundedEvidence.includes(hit.source))
+          .map((hit) => hit.source),
+      ),
+    ];
     const citedText =
       sources.length > 0 && !text.includes("本地来源：")
         ? `${text}\n本地来源：${sources.join("、")}`

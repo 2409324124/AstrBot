@@ -112,8 +112,12 @@
 - [x] RED→GREEN：Pi Agent 的 OpenAI-compatible 流式调用、工具循环、超时和模型切换
 - [x] RED→GREEN：独立 Qdrant dense + BM25 + RRF 自动召回与 `rag_search` 工具
 - [x] RED→GREEN：QQ 网关插件的私聊权限、人工接管和明确唤醒
-- [ ] 管理员插件改为调用 Gateway 的模型与白名单管理接口
+- [x] 管理员私聊命令改为调用 Gateway 的模型与白名单管理接口
+- [x] RED→GREEN：管理配置独立鉴权、SQLite 持久化、群白名单在 LLM/RAG 前拒绝
+- [x] RED→GREEN：事件运行时校验，非法 payload 不进入 Agent
+- [x] RED→GREEN：按 UMO 隔离的 SQLite 会话记忆、同会话串行化与 16K 内滚动压缩
 - [x] 运行迁移脚本新建 `agent_rag_v1`，11282 点完成，旧集合保持只读
+- [x] RED→GREEN：从 AstrBot `kb.db` 只读解析文档名，修复迁移后证据来源显示为 `unknown`
 - [ ] 完成 31 条历史检索、负例、联网搜索、权限、重复事件和故障回归
 - [ ] 远端旁路部署、备份、一次性切换白名单会话并验证回滚开关
 - **状态：** in_progress

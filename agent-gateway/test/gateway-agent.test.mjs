@@ -114,3 +114,90 @@ test("Gateway agent exposes web search with x.com filtering", async () => {
   assert.deepEqual(searchOptions, { domains: ["x.com"], maxResults: 5 });
   assert.equal(decision.action, "reply");
 });
+
+test("Gateway agent injects and records persistent conversation context", async () => {
+  const recorded = [];
+  const prompts = [];
+  const memory = {
+    context: () => "[最近对话]\n用户：我的CPU是9470C\n助手：记住了",
+    record: (...args) => recorded.push(args)
+  };
+  const agent = new GatewayAgent({
+    rag: { search: async () => [] },
+    exa: { search: async () => [] },
+    memory,
+    runtime: {
+      run: async (input) => {
+        prompts.push(input.prompt);
+        return {
+          text: "你的CPU是9470C。",
+          usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: {} }
+        };
+      }
+    },
+    evidenceThreshold: 0.2,
+    maxPromptTokens: 200
+  });
+  const current = {
+    schema_version: "1",
+    message_id: "memory-1",
+    umo: "group:709694410",
+    chat_type: "group",
+    group_id: "709694410",
+    sender_id: "1907483592",
+    self_id: "bot-account",
+    text: "那我的CPU是什么？",
+    mentions: [],
+    timestamp: 1784860800000,
+    is_admin: true,
+    owner_takeover_active: false
+  };
+
+  await agent.handle(current);
+
+  assert.match(prompts[0], /我的CPU是9470C/);
+  assert.deepEqual(recorded, [[
+    "group:709694410",
+    "那我的CPU是什么？",
+    "你的CPU是9470C。"
+  ]]);
+  assert.ok([...prompts[0]].length <= 200);
+});
+
+test("Gateway agent hard-bounds an oversized current message", async () => {
+  let prompt = "";
+  const agent = new GatewayAgent({
+    rag: { search: async () => [] },
+    exa: { search: async () => [] },
+    runtime: {
+      run: async (input) => {
+        prompt = input.prompt;
+        return {
+          text: "已处理",
+          usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: {} }
+        };
+      }
+    },
+    evidenceThreshold: 0.2,
+    maxPromptTokens: 100
+  });
+
+  await agent.handle({
+    schema_version: "1",
+    message_id: "oversized-1",
+    umo: "private:1",
+    chat_type: "private",
+    sender_id: "1",
+    self_id: "bot",
+    text: `开头${"A".repeat(500)}结尾`,
+    mentions: [],
+    timestamp: 1784860800000,
+    is_admin: true,
+    owner_takeover_active: false
+  });
+
+  assert.ok([...prompt].length <= 100);
+  assert.match(prompt, /开头/);
+  assert.match(prompt, /结尾/);
+  assert.match(prompt, /已截断/);
+});
