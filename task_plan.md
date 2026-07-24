@@ -100,8 +100,8 @@
 ### 阶段 10：联合回归、远端部署与灰度
 
 - [x] 运行目标测试、完整相关测试、静态检查和 diff 审计
-- [ ] 备份远端源码、配置、SQLite 与 Qdrant 快照
-- [ ] 仅重建/重启 AstrBot，保持 NapCat、Qdrant、Embedding 在线
+- [x] 备份远端源码、配置、SQLite 与 Qdrant 快照
+- [x] 仅重建/重启 AstrBot，保持 NapCat、Qdrant、Embedding 在线
 - [ ] 管理员私聊和单群灰度验证路由、延迟与人工接管
 - [ ] 提交并推送到 `fork/feature/local-rag-qdrant`
 - **状态：** in_progress

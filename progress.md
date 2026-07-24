@@ -169,7 +169,7 @@
 - 抢话题相关精确回归：26 passed（与 wiring / waking 矩阵合并前）。
 
 ### 阶段 9：知识库路由与延迟修复
-- **状态：** in_progress
+- **状态：** completed
 - 完成只读生产诊断：知识库先于意图路由执行；三个大库被会话静态绑定；最慢请求约 5.6 万输入 tokens / 25.8 秒。
 - 用户确认：BGE-M3 本地向量选库、16K 输入预算、暂不部署 reranker，并把本地意图拆为运行时与本地知识两类。
 - 现有相关测试基线：135 passed。
@@ -181,6 +181,12 @@
 - 路由与选库日志只记录路由、数量和耗时，不记录聊天正文。
 - 联合精确矩阵 254/254 通过；Ruff、compileall、`git diff --check` 通过。
 - 扩大到全部 unit 的运行在约 24% 后再次停滞，无失败标记；与已记录的本机 `aiosqlite` 挂起一致，手动终止，部署后改由远端容器跑相关持久化回归。
+- 创建并上传 34KB 增量 Git bundle；远端工作树从 `83f8ae1` 快进到 `9d07922`，工作树保持 clean。
+- 部署前 Qdrant/SQLite 快照：`/mnt/PM983/astrbot-rag/snapshots/astrbot-rag-20260724T085213Z`；源码 bundle 与 0600 配置备份位于 `/home/miku/astrbot-deploy/backups/routing-takeover-20260724T085500Z`。
+- `deepseek_chat.max_context_tokens` 从未设置改为 16384，并二次读取确认；只重启 AstrBot，NapCat、Qdrant、Embedding 均保持 7 天运行时长。
+- 远端容器联合矩阵 253 项通过；唯一失败为容器固定 CST 与旧测试硬编码 UTC 的环境断言，不涉及本次功能。
+- 真实本地 BGE-M3 API 返回 1024 维；选库烟测把 9470C/HBM 路由到 AI Infra，相似度 0.8214。
+- AstrBot 重启后为 running、restart_count=0，三分钟启动日志 ERROR/Traceback/Exception 计数为 0。
 
 ## 错误日志
 
@@ -188,3 +194,7 @@
 |---|---|---:|---|
 | 2026-07-24 | 首个跨设备测试直接调用尚不存在的追踪器方法，失败发生在测试接线而非行为 | 1 | 改为模拟平台活动快照公共边界，再重新确认 RED→GREEN |
 | 2026-07-24 | NapCat 版本筛选命令意外输出无关群聊正文 | 1 | 不保存正文；后续日志仅在进程内输出计数和时间戳 |
+| 2026-07-24 | 远端 `backup.sh` 的 Compose 视图误报 AstrBot 未运行 | 1 | 未停止服务；直接在运行中 AstrBot 容器调用同一个 `backup_state.py`，快照成功 |
+| 2026-07-24 | 远端测试误用 `uv --no-sync`，创建空 `.venv` 且缺少 pytest | 1 | 未运行测试；立即删除该临时目录，改用容器已有 `python -m pytest` |
+| 2026-07-24 | 未携带鉴权的 embedding curl 返回 401 | 1 | 证明服务启用鉴权；随后从配置进程内读取密钥，只输出 1024 维结果，未输出密钥 |
+| 2026-07-24 | 远端联合测试的 UTC 断言在 CST 容器中失败 | 1 | 其余 253 项通过；记录为既有环境依赖，不为本次功能修改时区逻辑 |
