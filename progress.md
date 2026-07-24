@@ -181,6 +181,12 @@
 - QQ 插件管理员私聊接管测试通过，Python Ruff 通过。
 - `migrate_agent_rag_v1.py` 已完成 canonical payload 的 RED→GREEN，并验证 Qdrant Python 模型可接受 1024 维 dense + BM25 Document。
 - 完整本地门禁：Node 6/6 文件通过、Python 20/20 通过、TypeScript/Ruff/Compose/diff-check 通过；秘密扫描仅发现示例占位符。
+- 提交 `c077677` 已推送 fork，并以 47KB Git bundle 将远端干净工作树快进到同一提交。
+- 远端安全生成未跟踪 `agent-gateway/.env`，复用现有 Qdrant/Embedding/Exa/DeepSeek 凭据；事件与管理 token 为独立随机值，Gateway 保持 disabled。
+- 远端 Docker Hub 拉取 Node 基础镜像超时；改为离线传输本机已验证的 125MB 镜像，成功启动旁路 Gateway。
+- 新鲜备份位于 `/mnt/PM983/astrbot-rag/snapshots/astrbot-rag-20260724T153857Z`。
+- `agent_rag_v1` 实际迁移 11282 点，Gateway `/healthz` 与 `/readyz` 均通过。
+- 真实旁路 E2E 正确回答 9470C、52C/104T、64GB HBM2e；发现未显示来源，已用 RED→GREEN 强制自动证据回答附本地来源。
 
 ### 阶段 8：真实 QQ 抢话失败重新诊断
 - **状态：** in_progress
@@ -227,3 +233,7 @@
 | 2026-07-24 | npm registry 通过本机代理未返回 Pi 包元数据 | 2 | 未修改依赖；改从官方 Git 仓库读取源码与 README，安装阶段再使用可工作的代理。 |
 | 2026-07-24 | 首次组合检查在仓库根执行 npm，且 Compose 默认真实 `.env` 不存在 | 1 | 无代码或服务变更；改在 `agent-gateway` 执行 npm，并让 Compose 的 env 文件路径可由示例配置覆盖。 |
 | 2026-07-24 | Gateway 镜像首次构建在容器内 `npm ci` 卡住 | 1 | 手动终止，未启动服务；为构建阶段显式使用 host network 和 `RAG_BUILD_PROXY`，并增加 `.dockerignore`。 |
+| 2026-07-24 | 首次增量 bundle 使用裸提交区间，被 Git 判定为空 | 1 | 改用命名分支 ref 加排除基线，生成 47KB 可验证 bundle。 |
+| 2026-07-24 | 远端普通用户无法创建 PM983 Gateway 目录 | 1 | 使用已授权 sudo 创建并归属 UID 1000，未改变其他目录。 |
+| 2026-07-24 | 远端 Docker Hub token 请求超时 | 1 | 不重复远端拉取；离线传输本机已验证的 125MB 镜像并成功加载。 |
+| 2026-07-24 | 通用 backup.sh 使用错误 Compose 视图误报 AstrBot 未运行 | 1 | 未停止服务；直接在运行中的 AstrBot 容器执行同一 backup_state.py，快照成功。 |

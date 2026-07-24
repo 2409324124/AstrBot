@@ -135,9 +135,14 @@ export class GatewayAgent {
     if (!text) {
       return { action: "no_reply", messages: [], reason_code: "empty_agent_reply" };
     }
+    const sources = [...new Set(evidence.map((hit) => hit.source))];
+    const citedText =
+      sources.length > 0 && !text.includes("本地来源：")
+        ? `${text}\n本地来源：${sources.join("、")}`
+        : text;
     return {
       action: "reply",
-      messages: [{ type: "text", text: `${text}（ai生成内容）` }],
+      messages: [{ type: "text", text: `${citedText}\n（ai生成内容）` }],
       reason_code: "agent_reply",
     };
   }

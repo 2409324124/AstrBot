@@ -55,7 +55,10 @@ test("Gateway agent retrieves evidence before calling the LLM", async () => {
   assert.ok(runInput.tools.some((tool) => tool.name === "rag_search"));
   assert.deepEqual(decision, {
     action: "reply",
-    messages: [{ type: "text", text: "你的服务器使用 Xeon Max 9470C。（ai生成内容）" }],
+    messages: [{
+      type: "text",
+      text: "你的服务器使用 Xeon Max 9470C。\n本地来源：test.md\n（ai生成内容）"
+    }],
     reason_code: "agent_reply"
   });
 });
