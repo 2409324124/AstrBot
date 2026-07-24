@@ -20,6 +20,8 @@
 - 会话记忆以 UMO 为键持久化，同一群/私聊串行处理；较旧交换滚入有界历史摘要，最近交换保留，且按上下文窗口为输出、系统提示和 RAG 证据预留空间。
 - 远端 `agent_rag_v1` Top-8 验收为 26/31；5 个失败用例的 `document_match` 全部为 true，说明向量索引、文档路由和来源名是正确的，失败边界是单次 Top-8 无法覆盖同文档内的所有详细字段。
 - 递增检查得到 Top-12=30/31、Top-16=31/31。所以不需要重新切片或重建 embedding；只需增加候选深度，再用现有 prompt 硬预算约束实际注入量。
+- canary 容器确实没有 HTTP(S) 代理变量，但这不等于不联网：容器直连 DeepSeek 未鉴权 `/models` 返回 401，鉴权 `/models` 在 146ms 返回 200，1-token chat completion 在 669ms 返回 200。
+- Pi AI 0.82.0 包含 `node-http-proxy` 解析器，会读取 `HTTP_PROXY`/`HTTPS_PROXY`；当前远端运行 env 未设置它们。本次卡顿不能归因于直连失败，canary 事件在客户端中断后仍完成并持久化为 `agent_reply`。
 
 ## 需求
 
@@ -179,3 +181,13 @@
 - BGE-M3 选库应只接收会话已授权的候选集，并使用知识库名称、描述和文档标题作为多个原型；低于 0.52 或 embedding 故障时跳过，不能回退到全库。
 - 原型向量可跨请求缓存，查询向量不可缓存；这避免每次为上百个标题重复预热，同时不会把不同用户问题混用。
 - `ContextManager` 原实现只执行一次 halving；合成的约 12 万估算 token 历史一次截断后仍约 5.4 万。循环截断可降到 16384 以下，并保留 system 和当前 user 消息。
+
+## 2026-07-25 Agent Gateway 正式切流结论
+
+- “容器没有联网/代理错误”不是本次慢响应的根因：Gateway 容器没有设置代理变量，但直连 DeepSeek 的鉴权模型列表为 146ms/200，最小聊天请求为 669ms/200；DNS、TLS、鉴权与出站链路均正常。
+- 正式 Gateway 镜像为本机通过 `127.0.0.1:18081` 构建代理生成并离线传输的已验证镜像；`/healthz` 与 `/readyz` 均通过，容器重启次数为 0。
+- 正式数据卷 E2E 的身份与 CPU 请求分别约 1.0s 和 1.3s，均返回规范 AI 标记与非 `unknown` 的本地来源。
+- `agent_rag_v1` 为 11282 点，`source=unknown` 精确计数为 0；白名单外群在 33ms 内以 `group_not_whitelisted` 拒绝，发生在 RAG/LLM 之前。
+- 管理接口未鉴权返回 401，鉴权 GET/PATCH 均为 200；当前模型为 `deepseek-v4-pro`、群白名单 5 个，并已写入 Gateway SQLite。
+- 切流只将未跟踪的 `AGENT_GATEWAY_ENABLED` 从 `false` 改为 `true` 并重建 AstrBot；NapCat、Gateway、Qdrant、Embedding 均未重启。回滚只需恢复该开关并重建 AstrBot。
+- 首次切流发现插件元数据的纯数字作者被 YAML 解析为整数。新增失败测试后将作者值显式加引号；第二次仅重建 AstrBot 后插件正常加载，近三分钟相关错误/元数据警告计数为 0。

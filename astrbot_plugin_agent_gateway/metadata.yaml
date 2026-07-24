@@ -1,5 +1,5 @@
 name: astrbot_plugin_agent_gateway
-author: 2409324124
+author: "2409324124"
 description: Route eligible QQ events to the external Agent Gateway.
 version: 0.1.0
 repo: https://github.com/2409324124/AstrBot

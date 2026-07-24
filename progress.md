@@ -243,6 +243,12 @@
 | 2026-07-24 | 本机不存在远端绝对路径的 AstrBot Compose 基底 | 1 | Gateway Compose 直接通过；AstrBot override 用最小临时基底验证后通过，临时文件已删除。 |
 | 2026-07-25 | 首次读取 TDD 技能时少了 `ok-skills/` 路径层级 | 1 | 未改代码；按技能目录映射改读 `/home/miku/.agents/skills/ok-skills/tdd/SKILL.md` 并完整读取。 |
 | 2026-07-25 | Top-16 工具测试首版无法区分自动检索与工具检索 | 1 | 实现已使两者都为 16；测试改为用公开调用次序区分两次检索，然后确认默认深度和 6000 字符上限均转绿。 |
+| 2026-07-25 | 最终 Gateway 镜像首次构建停在未配代理的 `npm ci`，未产出标签 | 1 | 未进行同命令重试；改用项目已验证的 host network + `127.0.0.1:18081` 构建代理路径。 |
+| 2026-07-25 | 受限本机 sandbox 不允许 `ss` 读取 netlink | 1 | 未改系统；不以该诊断判定代理，直接使用已验证构建代理参数并以构建结果为准。 |
+| 2026-07-25 | canary 无持久卷时不能写默认 `/data/gateway.sqlite3` | 1 | 这只影响临时启动命令；改用 `GATEWAY_DB_PATH=/tmp/gateway.sqlite3`，正式 Compose 仍使用已归属 node 用户的 PM983 数据卷。 |
+| 2026-07-25 | 首次 SQLite 诊断误查不存在的 `reason_code` 列，紧接的 JSON SQL 命令又有 shell 引号错误 | 2 | 未改数据；按真实 schema 只读取 `response_json`，在 Node 内解析并只输出 `reason_code`。 |
+| 2026-07-25 | 插件精确回归命令引用了不存在的 `test_agent_gateway_client.py` | 1 | pytest 未执行任何测试；先用 `rg --files` 确认可用文件，再运行真实插件测试 4/4 与 Ruff。 |
+| 2026-07-25 | 首次正式切流时插件元数据作者被 YAML 解析为整数 | 1 | 插件仍加载但产生校验警告；RED 测试复现后给纯数字作者加引号，GREEN 4/4，重新仅重建 AstrBot 后警告归零。 |
 
 ## 2026-07-24：Gateway 管理面与会话记忆
 
@@ -269,3 +275,13 @@
 - 幂等重跑 `agent_rag_v1` 迁移完成：处理 11282 点，集合总数不变，旧集合未删除。
 - 首次 31 条真实混合检索验收（Top-8）为 26/31；5 条失败均已命中预期文档，但预期术语分散在未进入 Top-8 的其他切片。暂不切换 QQ，继续测试 Top-12/16 与分组召回策略。
 - 同一验收在 Top-12 为 30/31，Top-16 为 31/31。决定将生产自动候选提升到 16，但保持现有 16K 硬 prompt 预算，并限制手动 `rag_search` 输出，避免候选增加变成 token 无界增长。
+- Top-16 生产对齐修复已以 `7995b30` 提交并推送，远端通过 3.5KB bundle 快进；远端使用新默认值复跑仍为 31/31。
+- 最终镜像以 host network + 构建代理成功产出：131MB，压缩后 125MB，SHA-256 `0383cb16545bb36825af74c2b0ba8a1f8fae3599854e1500f29fc6dca57131c0`；远端校验一致并完成 `docker load`。
+- canary 首次因无数据卷且默认 DB 路径为 `/data` 而立即退出；改用临时 `/tmp/gateway.sqlite3` 后 `/readyz`=200。
+- canary 直连网络已分层验证：DeepSeek 鉴权模型列表 146ms/200，1-token chat 669ms/200；首个完整 Gateway 请求在客户端中断后仍完成为 `agent_reply`。
+- 正式 Gateway 已强制重建为 `7995b30` 镜像，健康/就绪均通过；正式数据卷身份与 CPU E2E 分别约 1.0s/1.3s，来源非 unknown，AI 标记正确。
+- 管理 API 的未授权/读取/无操作持久化状态分别为 401/200/200；SQLite 已保存 `deepseek-v4-pro` 与 5 个群白名单。
+- Qdrant `agent_rag_v1` 为 11282 点、unknown 来源为 0；白名单外群 33ms fail-closed，未进入模型。
+- 已将未跟踪回滚开关 `AGENT_GATEWAY_ENABLED=true`，只重建 AstrBot；NapCat、Gateway、Qdrant、Embedding 全部 running、restart_count=0。
+- 插件作者元数据完成 RED→GREEN 修复并再次只重建 AstrBot；插件加载成功，三分钟 ERROR/Traceback/Exception/元数据校验失败计数为 0。
+- 阶段 11 的远端部署与一次性切流已完成；尚需用户从真实 QQ 发送一条管理员私聊和一个白名单群唤醒作为最终传输层烟测。

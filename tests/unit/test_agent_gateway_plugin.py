@@ -1,8 +1,22 @@
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import yaml
 
 from astrbot_plugin_agent_gateway.main import Main
+
+
+def test_plugin_metadata_author_is_a_nonempty_string() -> None:
+    metadata_path = (
+        Path(__file__).parents[2]
+        / "astrbot_plugin_agent_gateway"
+        / "metadata.yaml"
+    )
+    metadata = yaml.safe_load(metadata_path.read_text(encoding="utf-8"))
+
+    assert isinstance(metadata["author"], str)
+    assert metadata["author"].strip()
 
 
 class FakeEvent:
