@@ -18,7 +18,8 @@ from astrbot.core.provider import Provider
 class IntentRoute(str, Enum):
     """The small, explicit set of reply-evidence routes."""
 
-    LOCAL_SYSTEM = "local_system"
+    LOCAL_RUNTIME = "local_runtime"
+    LOCAL_KNOWLEDGE = "local_knowledge"
     TECHNICAL_CONCEPT = "technical_concept"
     EXTERNAL_FACT = "external_fact"
     CHAT_CREATIVE = "chat_creative"
@@ -38,9 +39,10 @@ Classify the user message into exactly one route and return JSON only. Choose by
 the message's semantic meaning and the evidence needed, never by literal words.
 
 Routes:
-- local_system: the answer depends on this actual current deployment: its
-  services, configuration, logs, local knowledge base, retrieval implementation,
-  data, or operational state.
+- local_runtime: the answer depends on this actual current deployment's live
+  services, configuration, logs, retrieval implementation, or operational state.
+- local_knowledge: the answer depends on documents stored in this deployment's
+  local knowledge bases rather than on its live runtime configuration.
 - technical_concept: asks to explain, compare, analyse, or research a technical
   concept without needing current real-world facts.
 - external_fact: asks about current or real-world people, places, events,
@@ -50,16 +52,17 @@ Routes:
   open-ended social interaction.
 
 Decision boundaries:
-- Assistant identity/persona or ordinary social talk is chat_creative, not
-  local_system. Only use local_system when the answer requires evidence about
-  the current deployment or its local data.
+- Assistant identity/persona or ordinary social talk is chat_creative, not a
+  local route. Only use local_runtime for live deployment evidence and
+  local_knowledge for the contents of locally stored documents.
 - A stable technical explanation is technical_concept. A question about whether
-  that technology is enabled here is local_system.
+  that technology is enabled here is local_runtime.
 - Current external facts requiring web evidence are external_fact.
 
 Examples:
 - "你是谁" -> {"route":"chat_creative","confidence":0.99}
-- "这个部署当前是否启用了 BM25" -> {"route":"local_system","confidence":0.99}
+- "这个部署当前是否启用了 BM25" -> {"route":"local_runtime","confidence":0.99}
+- "本地知识库中的 9470C 测试结论是什么" -> {"route":"local_knowledge","confidence":0.99}
 - "解释 BM25 的工作原理" -> {"route":"technical_concept","confidence":0.99}
 - "今天发布了哪些 AI 模型" -> {"route":"external_fact","confidence":0.99}
 

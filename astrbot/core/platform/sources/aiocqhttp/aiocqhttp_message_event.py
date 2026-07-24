@@ -28,6 +28,8 @@ class OutboundMessageTracker:
     def __init__(self) -> None:
         self._message_ids: dict[str, float] = {}
         self._pending_fingerprints: deque[tuple[str, float]] = deque()
+        self._group_sent_at: dict[str, float] = {}
+        self._group_activity_cache: dict[str, tuple[float, dict]] = {}
 
     def remember_pending(self, message: list[dict]) -> None:
         self._prune()
@@ -40,6 +42,45 @@ class OutboundMessageTracker:
             return
         self._prune()
         self._message_ids[str(message_id)] = time.monotonic() + 30
+
+    def remember_group_send(self, group_id: object, *, sent_at: float) -> None:
+        if group_id is None:
+            return
+        group_key = str(group_id)
+        self._group_sent_at[group_key] = float(sent_at)
+        self._group_activity_cache.pop(group_key, None)
+
+    def get_group_send_time(self, group_id: object) -> float | None:
+        if group_id is None:
+            return None
+        return self._group_sent_at.get(str(group_id))
+
+    def get_group_activity(self, group_id: object) -> dict | None:
+        if group_id is None:
+            return None
+        group_key = str(group_id)
+        cached = self._group_activity_cache.get(group_key)
+        if not cached:
+            return None
+        expires_at, activity = cached
+        if expires_at <= time.monotonic():
+            self._group_activity_cache.pop(group_key, None)
+            return None
+        return activity
+
+    def remember_group_activity(
+        self,
+        group_id: object,
+        activity: dict,
+        *,
+        ttl_seconds: float = 5.0,
+    ) -> None:
+        if group_id is None:
+            return
+        self._group_activity_cache[str(group_id)] = (
+            time.monotonic() + ttl_seconds,
+            activity,
+        )
 
     def discard_pending(self, message: list[dict]) -> None:
         """Forget one pending send after the corresponding action failed.
@@ -206,6 +247,8 @@ class AiocqhttpMessageEvent(AstrMessageEvent):
             raise
         if isinstance(result, dict):
             tracker.remember_sent_message_id(result.get("message_id"))
+        if is_group and session_id is not None:
+            tracker.remember_group_send(session_id, sent_at=time.time())
 
     @classmethod
     async def send_message(
@@ -280,6 +323,35 @@ class AiocqhttpMessageEvent(AstrMessageEvent):
             session_id=session_id,
         )
         await super().send(message)
+
+    async def get_group_account_activity(self) -> dict[str, float | None] | None:
+        """Return current-account activity metadata for this group."""
+        group_id = self.get_group_id()
+        self_id = self.get_self_id()
+        if not group_id or not self_id:
+            return None
+        tracker = get_outbound_message_tracker(self.bot)
+        if cached := tracker.get_group_activity(group_id):
+            return cached
+        params = {
+            "group_id": int(group_id) if str(group_id).isdigit() else group_id,
+            "user_id": int(self_id) if str(self_id).isdigit() else self_id,
+            "no_cache": True,
+        }
+        member = await self.bot.call_action("get_group_member_info", **params)
+        if not isinstance(member, dict):
+            return None
+        try:
+            account_last_sent_at = float(member["last_sent_time"])
+        except (KeyError, TypeError, ValueError):
+            return None
+        activity = {
+            "account_last_sent_at": account_last_sent_at,
+            "bot_last_sent_at": tracker.get_group_send_time(group_id),
+            "observed_at": time.time(),
+        }
+        tracker.remember_group_activity(group_id, activity)
+        return activity
 
     async def send_streaming(
         self,

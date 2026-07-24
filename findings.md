@@ -131,3 +131,32 @@
 - NapCat 未重启；仅 AstrBot 重启并重新建立 OneBot WebSocket，Qdrant 与 Embedding 运行时长未变化。
 - 生产容器使用的依赖环境中，Qdrant 内存测试 4/4、号主接管相关测试 30/30 通过；启动后精确错误计数为 0。
 - 代码无法判断号主“只在线但没发言”；900 秒窗口从号主实际群消息开始。这一协议边界仍成立。
+
+## 2026-07-24 生产回归失败与新根因方向
+
+- 用户确认 Bot 仍会抢话题，阶段 8 的真实 QQ 验收失败；此前单元测试、payload 回放和容器断言不能替代真实事件链。
+- 必须重新验证三段状态传递：NapCat 是否上报自身人工消息、适配器是否设置人工标记、Waking/LLM 前置阶段是否读取同一群的接管窗口。
+- 当前意图分类不是关键词 if/else，而是 DeepSeek 结构化 JSON；但只有四种固定路由，且知识库检索发生在分类之前。
+- 三个会话静态绑定“模型图谱、论文原文、AI Infra”，所有唤醒请求都可能先注入这些库的 Top-5。
+- 最近最慢主模型调用输入约 5.6 万 tokens、耗时 25.8 秒；宿主机资源没有饱和。
+- BGE-M3 多原型只读探针：Transformer→论文库 0.5608；9470C/EPYC→AI Infra 0.6021；贪心/双指针最高 0.4784。初始安全阈值采用 0.52。
+- 目标路由拆为 `local_runtime`、`local_knowledge`、`technical_concept`、`external_fact`、`chat_creative`；只有中间两类允许向量选库。
+- 远端过去 48 小时 `manual_self_message_detected`、`started`、`reply_suppressed`、`handoff_accepted` 全为 0；接管窗口从未启动，问题发生在计时器之前。
+- 生产 `unique_session=false`，排除号主与群友 UMO 因会话隔离而不同；`group_icl_enable` 和 `active_reply_enable` 均为 true。
+- NapCat 配置目录存在冲突：`onebot11_*.json` 的 astrbot WebSocket Client 为 `reportSelfMessage=true`，而 `napcat_protocol_*.json` 的同名嵌套客户端仍为 false。必须以运行态 API/事件为准确认实际配置来源。
+- NapCat WebUI 运行态 `OB11Config/GetConfig` 已确认活动 astrbot 客户端确为 `reportSelfMessage=true`，顶层旧字段不存在；磁盘冲突不是当前运行态根因。
+- NapCat 官方仓库/历史 Issue 的实际 payload 表明自身群消息仍以普通 `post_type=message`、`message_type=group` 上报，而非必须依赖 `message_sent`；现有适配器入口方向原则上正确。
+- 因配置与事件类型均基本正确但 AstrBot 48 小时零检测，下一假设是：号主从另一 QQ 设备发送的同步消息没有进入该 NapCat 实例的自身消息上报流，或 NapCat 内部已收到但未投递到反向 WS。
+- NapCat 7 天脱敏统计中，当前登录账号作为群消息发送者的记录仍为 0；生产无法依赖跨设备自身消息事件启动接管。
+- 根因修复方向：保留 `reportSelfMessage` 快路径，并在目标群回复前读取当前账号的群成员 `last_sent_time`，与 AstrBot 自身成功发送时间对账。若群内最近账号活动不是 AstrBot 发送，则启动该群 900 秒人工窗口。
+- 活动探测必须按群限频、首轮仅建立基线、API/字段异常时 fail-open；AstrBot 每次成功发送后立即记录该群发送时间，避免把 Bot 自己的回复判成人工接管。
+- 一次 NapCat 版本日志筛选意外输出了无关群聊正文；未写入审计内容，后续日志命令只输出计数和时间戳。
+
+## 2026-07-24 实现结论
+
+- 跨设备号主消息无法依赖 WebSocket 自消息事件；回复前对账群成员 `last_sent_time` 与 AstrBot 本群最后成功发送时间，可以在不读取聊天正文的前提下识别人工作者活动。
+- 首次没有 Bot 发送基线时必须只建立观察基线；OneBot 异常必须 fail-open；Bot 发送后必须立即清掉 5 秒活动缓存，否则可能使用过期快照误静音。
+- 旧主链在结构化意图分类之前调用 `_apply_kb`，因此即使分类正确，三个静态绑定库也已污染上下文；调用顺序本身就是错误路由的直接根因。
+- BGE-M3 选库应只接收会话已授权的候选集，并使用知识库名称、描述和文档标题作为多个原型；低于 0.52 或 embedding 故障时跳过，不能回退到全库。
+- 原型向量可跨请求缓存，查询向量不可缓存；这避免每次为上百个标题重复预热，同时不会把不同用户问题混用。
+- `ContextManager` 原实现只执行一次 halving；合成的约 12 万估算 token 历史一次截断后仍约 5.4 万。循环截断可降到 16384 以下，并保留 system 和当前 user 消息。

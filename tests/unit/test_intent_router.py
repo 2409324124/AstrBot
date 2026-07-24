@@ -19,13 +19,13 @@ from astrbot.core.provider.entities import LLMResponse
 
 
 @pytest.mark.asyncio
-async def test_llm_router_classifies_local_system_message_without_chat_history():
+async def test_llm_router_classifies_local_knowledge_message_without_chat_history():
     """The isolated router must use structured model output, not lexical rules."""
     provider = MagicMock()
     provider.text_chat = AsyncMock(
         return_value=LLMResponse(
             role="assistant",
-            completion_text='{"route":"local_system","confidence":0.97}',
+            completion_text='{"route":"local_knowledge","confidence":0.97}',
         )
     )
 
@@ -34,7 +34,7 @@ async def test_llm_router_classifies_local_system_message_without_chat_history()
         "这个知识库是否使用 BM25 的向量检索？",
     )
 
-    assert decision.route is IntentRoute.LOCAL_SYSTEM
+    assert decision.route is IntentRoute.LOCAL_KNOWLEDGE
     assert decision.confidence == 0.97
     provider.text_chat.assert_awaited_once()
     kwargs = provider.text_chat.await_args.kwargs
@@ -42,6 +42,21 @@ async def test_llm_router_classifies_local_system_message_without_chat_history()
     assert kwargs["func_tool"] is None
     assert kwargs["request_max_retries"] == 1
     assert "JSON" in kwargs["system_prompt"]
+
+
+@pytest.mark.asyncio
+async def test_llm_router_separates_runtime_state_from_local_documents():
+    provider = MagicMock()
+    provider.text_chat = AsyncMock(
+        return_value=LLMResponse(
+            role="assistant",
+            completion_text='{"route":"local_runtime","confidence":0.98}',
+        )
+    )
+
+    decision = await classify_intent(provider, "当前 AstrBot 容器是否在线？")
+
+    assert decision.route is IntentRoute.LOCAL_RUNTIME
 
 
 @pytest.mark.asyncio

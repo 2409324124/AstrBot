@@ -209,7 +209,7 @@ async def test_member_group_mute_stops_the_event_before_any_bot_reply():
         },
     }
     main.group_chat_context = SimpleNamespace(
-        should_suppress_group_bot_reply=MagicMock(return_value=True),
+        should_suppress_group_bot_reply=AsyncMock(return_value=True),
         need_active_reply=AsyncMock(),
         handle_message=AsyncMock(),
     )

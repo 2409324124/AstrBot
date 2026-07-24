@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -42,6 +42,7 @@ def make_event(
     components: list | None = None,
     sender_role: str = "member",
     handlers_parsed_params: dict | None = None,
+    account_activity: dict | None = None,
 ):
     event = MagicMock()
     event.unified_msg_origin = umo
@@ -60,9 +61,76 @@ def make_event(
     )
     event.get_messages.return_value = message_components
     event.get_self_id.return_value = "3250641287"
+    event.get_group_account_activity = (
+        AsyncMock(return_value=account_activity) if account_activity else None
+    )
     extras = {"handlers_parsed_params": handlers_parsed_params or {}}
     event.get_extra.side_effect = lambda key, default=None: extras.get(key, default)
     return event
+
+
+@pytest.mark.asyncio
+async def test_cross_device_owner_activity_suppresses_reply_without_self_event():
+    context = make_context(trigger_keywords=["小董"])
+    now = 1_700_000_000.0
+
+    suppressed = await context.should_suppress_group_bot_reply(
+        make_event(
+            "小董你觉得呢",
+            account_activity={
+                "account_last_sent_at": now - 5,
+                "bot_last_sent_at": now - 20,
+                "observed_at": now,
+            },
+        )
+    )
+
+    assert suppressed is True
+
+
+@pytest.mark.asyncio
+async def test_account_activity_without_bot_baseline_does_not_suppress_first_observation():
+    context = make_context(trigger_keywords=["小董"])
+
+    suppressed = await context.should_suppress_group_bot_reply(
+        make_event(
+            "小董你觉得呢",
+            account_activity={
+                "account_last_sent_at": 1_700_000_000.0,
+                "bot_last_sent_at": None,
+                "observed_at": 1_700_000_005.0,
+            },
+        )
+    )
+
+    assert suppressed is False
+
+
+@pytest.mark.asyncio
+async def test_account_activity_not_newer_than_bot_send_does_not_suppress_reply():
+    context = make_context(trigger_keywords=["小董"])
+
+    suppressed = await context.should_suppress_group_bot_reply(
+        make_event(
+            "小董你觉得呢",
+            account_activity={
+                "account_last_sent_at": 1_700_000_000.0,
+                "bot_last_sent_at": 1_700_000_001.0,
+                "observed_at": 1_700_000_005.0,
+            },
+        )
+    )
+
+    assert suppressed is False
+
+
+@pytest.mark.asyncio
+async def test_account_activity_probe_failure_fails_open():
+    context = make_context(trigger_keywords=["小董"])
+    event = make_event("小董你觉得呢")
+    event.get_group_account_activity = AsyncMock(side_effect=RuntimeError("offline"))
+
+    assert await context.should_suppress_group_bot_reply(event) is False
 
 
 @pytest.mark.asyncio
@@ -139,7 +207,10 @@ async def test_handoff_requires_a_quoted_message():
     )
 
     assert instruction is None
-    assert context.should_suppress_group_bot_reply(make_event("小董你觉得呢")) is True
+    assert (
+        await context.should_suppress_group_bot_reply(make_event("小董你觉得呢"))
+        is True
+    )
 
 
 @pytest.mark.asyncio
@@ -155,7 +226,10 @@ async def test_handoff_can_only_be_sent_by_the_shared_account_owner():
     )
 
     assert instruction is None
-    assert context.should_suppress_group_bot_reply(make_event("小董你觉得呢")) is True
+    assert (
+        await context.should_suppress_group_bot_reply(make_event("小董你觉得呢"))
+        is True
+    )
 
 
 @pytest.mark.asyncio
@@ -169,8 +243,8 @@ async def test_human_takeover_suppresses_same_group_mentions_and_admin_messages(
     )
     admin_message = make_event("小董你觉得呢", sender_role="admin")
 
-    assert context.should_suppress_group_bot_reply(mention) is True
-    assert context.should_suppress_group_bot_reply(admin_message) is True
+    assert await context.should_suppress_group_bot_reply(mention) is True
+    assert await context.should_suppress_group_bot_reply(admin_message) is True
 
 
 @pytest.mark.asyncio
@@ -187,8 +261,8 @@ async def test_human_takeover_is_scoped_to_one_group_and_allows_explicit_command
         umo="qq_napcat:GroupMessage:456",
     )
 
-    assert context.should_suppress_group_bot_reply(explicit_command) is False
-    assert context.should_suppress_group_bot_reply(other_group) is False
+    assert await context.should_suppress_group_bot_reply(explicit_command) is False
+    assert await context.should_suppress_group_bot_reply(other_group) is False
 
 
 @pytest.mark.asyncio
@@ -196,7 +270,7 @@ async def test_member_hush_phrase_mutes_only_its_group_for_thirty_minutes():
     context = make_context(trigger_keywords=["小董"])
     hush_event = make_event("这群别开bot")
 
-    assert context.should_suppress_group_bot_reply(hush_event) is True
+    assert await context.should_suppress_group_bot_reply(hush_event) is True
     assert await context.need_active_reply(make_event("小董你觉得呢")) is False
     assert (
         await context.need_active_reply(
@@ -205,13 +279,14 @@ async def test_member_hush_phrase_mutes_only_its_group_for_thirty_minutes():
     ) is True
 
 
-def test_group_admin_hush_phrase_does_not_silence_the_bot():
+@pytest.mark.asyncio
+async def test_group_admin_hush_phrase_does_not_silence_the_bot():
     context = make_context()
 
     assert (
-        context.should_suppress_group_bot_reply(
-            make_event("这群别开bot", sender_role="admin")
-        )
+            await context.should_suppress_group_bot_reply(
+                make_event("这群别开bot", sender_role="admin")
+            )
         is False
     )
 

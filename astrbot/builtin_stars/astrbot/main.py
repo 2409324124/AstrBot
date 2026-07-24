@@ -167,7 +167,7 @@ class Main(star.Star):
             suppress_reply = getattr(
                 self.group_chat_context, "should_suppress_group_bot_reply", None
             )
-            if callable(suppress_reply) and suppress_reply(event):
+            if callable(suppress_reply) and await suppress_reply(event):
                 event.stop_event()
                 return
 

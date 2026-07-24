@@ -586,8 +586,31 @@ class TestContextManager:
                 ) as mock_halving:
                     _ = await manager.process(long_messages)
 
-                    # Halving should be called
-                    mock_halving.assert_called_once()
+                    # Halving repeats until the result fits or no longer changes.
+                    assert mock_halving.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_large_history_is_repeatedly_truncated_below_strict_budget(self):
+        config = ContextConfig(max_context_tokens=16_384)
+        manager = ContextManager(config)
+        messages = [self.create_message("system", "system policy")]
+        for index in range(20):
+            messages.extend(
+                [
+                    self.create_message("user", f"old user {index} " + "x" * 10_000),
+                    self.create_message(
+                        "assistant",
+                        f"old assistant {index} " + "y" * 10_000,
+                    ),
+                ]
+            )
+        messages.append(self.create_message("user", "current question"))
+
+        result = await manager.process(messages)
+
+        assert manager.token_counter.count_tokens(result) <= 16_384
+        assert result[0].role == "system"
+        assert result[-1].content == "current question"
 
     # ==================== Combined Truncation and Compression Tests ====================
 

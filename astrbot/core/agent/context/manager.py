@@ -108,14 +108,20 @@ class ContextManager:
             f" compression rate: {compress_rate:.2f}%.",
         )
 
-        # last check
-        if self.compressor.should_compress(
-            messages, tokens_after_summary, self.config.max_context_tokens
-        ):
+        # Enforce the actual provider budget, not merely the compression trigger.
+        while tokens_after_summary > self.config.max_context_tokens:
             logger.info(
                 "Context still exceeds max tokens after compression, applying halving truncation..."
             )
-            # still need compress, truncate by half
-            messages = self.truncator.truncate_by_halving(messages)
+            truncated = self.truncator.truncate_by_halving(messages)
+            if truncated == messages:
+                logger.warning(
+                    "Context cannot be reduced further without dropping protected messages: %d > %d tokens.",
+                    tokens_after_summary,
+                    self.config.max_context_tokens,
+                )
+                break
+            messages = truncated
+            tokens_after_summary = self.token_counter.count_tokens(messages)
 
         return messages

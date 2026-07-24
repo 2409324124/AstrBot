@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from aiocqhttp import Event
@@ -113,3 +113,77 @@ async def test_failed_send_does_not_leave_pending_self_message_fingerprint():
     assert not get_outbound_message_tracker(bot).consume_if_bot_message(
         {"message_id": 100, "message": message}
     )
+
+
+@pytest.mark.asyncio
+async def test_group_account_activity_includes_last_successful_bot_send():
+    bot = MagicMock()
+    bot.send_group_msg = AsyncMock(return_value={"message_id": 99})
+    bot.call_action = AsyncMock(return_value={"last_sent_time": 120})
+    event = AiocqhttpMessageEvent.__new__(AiocqhttpMessageEvent)
+    event.bot = bot
+    event.get_group_id = MagicMock(return_value="123")
+    event.get_self_id = MagicMock(return_value="3250641287")
+
+    with patch(
+        "astrbot.core.platform.sources.aiocqhttp.aiocqhttp_message_event.time.time",
+        side_effect=[100.0, 130.0],
+    ):
+        await AiocqhttpMessageEvent._dispatch_send(
+            bot=bot,
+            event=None,
+            is_group=True,
+            session_id="123",
+            messages=[{"type": "text", "data": {"text": "Bot reply"}}],
+        )
+        activity = await event.get_group_account_activity()
+
+    assert activity == {
+        "account_last_sent_at": 120.0,
+        "bot_last_sent_at": 100.0,
+        "observed_at": 130.0,
+    }
+
+
+@pytest.mark.asyncio
+async def test_group_account_activity_is_rate_limited_per_group():
+    bot = MagicMock()
+    bot.call_action = AsyncMock(return_value={"last_sent_time": 120})
+    event = AiocqhttpMessageEvent.__new__(AiocqhttpMessageEvent)
+    event.bot = bot
+    event.get_group_id = MagicMock(return_value="123")
+    event.get_self_id = MagicMock(return_value="3250641287")
+
+    first = await event.get_group_account_activity()
+    second = await event.get_group_account_activity()
+
+    assert first == second
+    bot.call_action.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_successful_group_send_invalidates_cached_account_activity():
+    bot = MagicMock()
+    bot.call_action = AsyncMock(
+        side_effect=[{"last_sent_time": 120}, {"last_sent_time": 140}]
+    )
+    bot.send_group_msg = AsyncMock(return_value={"message_id": 99})
+    event = AiocqhttpMessageEvent.__new__(AiocqhttpMessageEvent)
+    event.bot = bot
+    event.get_group_id = MagicMock(return_value="123")
+    event.get_self_id = MagicMock(return_value="3250641287")
+
+    first = await event.get_group_account_activity()
+    await AiocqhttpMessageEvent._dispatch_send(
+        bot=bot,
+        event=None,
+        is_group=True,
+        session_id="123",
+        messages=[{"type": "text", "data": {"text": "Bot reply"}}],
+    )
+    second = await event.get_group_account_activity()
+
+    assert first["account_last_sent_at"] == 120.0
+    assert second["account_last_sent_at"] == 140.0
+    assert second["bot_last_sent_at"] is not None
+    assert bot.call_action.await_count == 2

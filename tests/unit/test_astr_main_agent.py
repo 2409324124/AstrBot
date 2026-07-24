@@ -253,7 +253,7 @@ async def test_verified_reply_policy_uses_llm_local_route_and_skips_exa(
     async def fake_classify(router_provider, prompt):
         assert router_provider is provider
         assert prompt == req.prompt
-        return IntentDecision(IntentRoute.LOCAL_SYSTEM, confidence=0.98)
+        return IntentDecision(IntentRoute.LOCAL_KNOWLEDGE, confidence=0.98)
 
     async def fail_if_called(*args, **kwargs):
         raise AssertionError("local system route must not call Exa")
@@ -275,11 +275,10 @@ async def test_verified_reply_policy_uses_llm_local_route_and_skips_exa(
 
     await ama._apply_verified_factual_reply_policy(event, req, context, provider)
 
-    event.set_extra.assert_any_call("_intent_route", "local_system")
+    event.set_extra.assert_any_call("_intent_route", "local_knowledge")
     assert "local_evidence" in req.extra_user_content_parts[-1].text
     assert "BM25 稀疏检索" in req.extra_user_content_parts[-1].text
-    assert "runtime-provider-settings" in req.extra_user_content_parts[-1].text
-    assert '"web_search_enabled": true' in req.extra_user_content_parts[-1].text
+    assert "runtime-provider-settings" not in req.extra_user_content_parts[-1].text
 
 
 @pytest.mark.asyncio
@@ -342,7 +341,7 @@ async def test_local_route_gets_runtime_config_even_without_lorebook_match(monke
         ama,
         "classify_intent",
         AsyncMock(
-            return_value=IntentDecision(IntentRoute.LOCAL_SYSTEM, confidence=0.99)
+            return_value=IntentDecision(IntentRoute.LOCAL_RUNTIME, confidence=0.99)
         ),
     )
     monkeypatch.setattr(ama, "load_lorebook", lambda: ())
@@ -417,7 +416,10 @@ async def test_local_evidence_scans_only_five_most_recent_user_messages(monkeypa
         ama,
         "classify_intent",
         AsyncMock(
-            return_value=IntentDecision(IntentRoute.LOCAL_SYSTEM, confidence=0.99)
+            return_value=IntentDecision(
+                IntentRoute.LOCAL_KNOWLEDGE,
+                confidence=0.99,
+            )
         ),
     )
     monkeypatch.setattr(
@@ -639,6 +641,90 @@ class TestGetSessionConv:
 
 class TestApplyKb:
     """Tests for _apply_kb function."""
+
+    @pytest.mark.asyncio
+    async def test_runtime_route_skips_knowledge_base_completely(
+        self, mock_event, mock_context
+    ):
+        req = ProviderRequest(prompt="当前容器在线吗？")
+        config = ama.MainAgentBuildConfig(tool_call_timeout=60, kb_agentic_mode=False)
+        mock_event.get_extra.side_effect = lambda key, default=None: (
+            IntentRoute.LOCAL_RUNTIME.value if key == "_intent_route" else default
+        )
+
+        with (
+            patch(
+                "astrbot.core.astr_main_agent.select_authorized_knowledge_bases",
+                AsyncMock(),
+            ) as select,
+            patch(
+                "astrbot.core.astr_main_agent.retrieve_knowledge_base",
+                AsyncMock(),
+            ) as retrieve,
+        ):
+            await ama._apply_kb(mock_event, req, mock_context, config)
+
+        select.assert_not_awaited()
+        retrieve.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_local_knowledge_route_selects_before_retrieving_three_chunks(
+        self, mock_event, mock_context
+    ):
+        req = ProviderRequest(prompt="9470C 的 HBM 有多大？")
+        config = ama.MainAgentBuildConfig(tool_call_timeout=60, kb_agentic_mode=False)
+        mock_event.get_extra.side_effect = lambda key, default=None: (
+            IntentRoute.LOCAL_KNOWLEDGE.value if key == "_intent_route" else default
+        )
+
+        with (
+            patch(
+                "astrbot.core.astr_main_agent.select_authorized_knowledge_bases",
+                AsyncMock(return_value=["AI Infra"]),
+            ) as select,
+            patch(
+                "astrbot.core.astr_main_agent.retrieve_knowledge_base",
+                AsyncMock(return_value="KB result"),
+            ) as retrieve,
+        ):
+            await ama._apply_kb(mock_event, req, mock_context, config)
+
+        select.assert_awaited_once_with(
+            query=req.prompt,
+            umo=mock_event.unified_msg_origin,
+            context=mock_context,
+        )
+        retrieve.assert_awaited_once_with(
+            query=req.prompt,
+            umo=mock_event.unified_msg_origin,
+            context=mock_context,
+            kb_names=["AI Infra"],
+            max_results=3,
+        )
+
+    @pytest.mark.asyncio
+    async def test_no_semantic_kb_match_never_falls_back_to_all_databases(
+        self, mock_event, mock_context
+    ):
+        req = ProviderRequest(prompt="贪心为什么不能用双指针？")
+        config = ama.MainAgentBuildConfig(tool_call_timeout=60, kb_agentic_mode=False)
+        mock_event.get_extra.side_effect = lambda key, default=None: (
+            IntentRoute.TECHNICAL_CONCEPT.value if key == "_intent_route" else default
+        )
+
+        with (
+            patch(
+                "astrbot.core.astr_main_agent.select_authorized_knowledge_bases",
+                AsyncMock(return_value=[]),
+            ),
+            patch(
+                "astrbot.core.astr_main_agent.retrieve_knowledge_base",
+                AsyncMock(),
+            ) as retrieve,
+        ):
+            await ama._apply_kb(mock_event, req, mock_context, config)
+
+        retrieve.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_apply_kb_without_agentic_mode(self, mock_event, mock_context):
@@ -1674,6 +1760,45 @@ class TestBuildMainAgent:
             new=AsyncMock(return_value=None),
         ):
             yield
+
+    @pytest.mark.asyncio
+    async def test_intent_route_is_applied_before_knowledge_base_selection(
+        self, mock_event, mock_context, mock_provider
+    ):
+        order: list[str] = []
+        req = ProviderRequest(prompt="question")
+        req.conversation = MagicMock(persona_id=None, history="[]")
+        config = ama.MainAgentBuildConfig(tool_call_timeout=60)
+        route = AsyncMock(side_effect=lambda *args: order.append("route"))
+        knowledge = AsyncMock(side_effect=lambda *args: order.append("knowledge"))
+
+        with (
+            patch("astrbot.core.astr_main_agent.AgentRunner") as runner_cls,
+            patch("astrbot.core.astr_main_agent.AstrAgentContext"),
+            patch(
+                "astrbot.core.astr_main_agent._decorate_llm_request",
+                AsyncMock(),
+            ),
+            patch(
+                "astrbot.core.astr_main_agent._apply_verified_factual_reply_policy",
+                route,
+            ),
+            patch("astrbot.core.astr_main_agent._apply_kb", knowledge),
+        ):
+            runner_cls.return_value.reset = AsyncMock()
+            result = await ama.build_main_agent(
+                event=mock_event,
+                plugin_context=mock_context,
+                config=config,
+                provider=mock_provider,
+                req=req,
+                apply_reset=False,
+            )
+
+        assert result is not None
+        assert order == ["route", "knowledge"]
+        if result.reset_coro:
+            result.reset_coro.close()
 
     @pytest.mark.asyncio
     async def test_build_main_agent_basic(

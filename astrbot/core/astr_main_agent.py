@@ -6,6 +6,7 @@ import datetime
 import json
 import os
 import platform
+import time
 import zoneinfo
 from collections.abc import Coroutine
 from dataclasses import dataclass, field
@@ -96,6 +97,7 @@ from astrbot.core.tools.cron_tools import FutureTaskTool
 from astrbot.core.tools.knowledge_base_tools import (
     KnowledgeBaseQueryTool,
     retrieve_knowledge_base,
+    select_authorized_knowledge_bases,
 )
 from astrbot.core.tools.message_tools import SendMessageToUserTool
 from astrbot.core.tools.web_search_tools import (
@@ -309,14 +311,41 @@ async def _apply_kb(
     plugin_context: Context,
     config: MainAgentBuildConfig,
 ) -> None:
+    intent_route = event.get_extra("_intent_route")
+    selected_kb_names: list[str] | None = None
+    if intent_route:
+        if intent_route not in {
+            IntentRoute.LOCAL_KNOWLEDGE.value,
+            IntentRoute.TECHNICAL_CONCEPT.value,
+        }:
+            return
+        if req.prompt is None or not req.prompt.strip():
+            return
+        selected_kb_names = await select_authorized_knowledge_bases(
+            query=req.prompt,
+            umo=event.unified_msg_origin,
+            context=plugin_context,
+        )
+        if not selected_kb_names:
+            return
+        event.set_extra("_selected_kb_names", selected_kb_names)
+
     if not config.kb_agentic_mode:
         if req.prompt is None or not req.prompt.strip():
             return
         try:
+            retrieve_kwargs = {
+                "query": req.prompt,
+                "umo": event.unified_msg_origin,
+                "context": plugin_context,
+            }
+            if selected_kb_names is not None:
+                retrieve_kwargs.update(
+                    kb_names=selected_kb_names,
+                    max_results=3,
+                )
             kb_result = await retrieve_knowledge_base(
-                query=req.prompt,
-                umo=event.unified_msg_origin,
-                context=plugin_context,
+                **retrieve_kwargs,
             )
             if not kb_result:
                 return
@@ -1326,6 +1355,7 @@ async def _apply_verified_factual_reply_policy(
     provider: Provider,
 ) -> None:
     """Route reply evidence without relying on lexical intent heuristics."""
+    started_at = time.monotonic()
     cfg = plugin_context.get_config(umo=event.unified_msg_origin)
     normalize_legacy_web_search_config(cfg)
     provider_settings = cfg.get("provider_settings", {})
@@ -1362,22 +1392,28 @@ async def _apply_verified_factual_reply_policy(
     event.set_extra("_intent_route", decision.route.value)
     event.set_extra("_intent_router_fallback", decision.is_fallback)
     logger.info(
-        "Structured intent route selected: route=%s confidence=%.2f fallback=%s",
+        "Structured intent route selected: route=%s confidence=%.2f fallback=%s elapsed_ms=%.1f",
         decision.route.value,
         decision.confidence,
         decision.is_fallback,
+        (time.monotonic() - started_at) * 1000,
     )
-    if decision.route in {IntentRoute.LOCAL_SYSTEM, IntentRoute.TECHNICAL_CONCEPT}:
+    if decision.route in {
+        IntentRoute.LOCAL_RUNTIME,
+        IntentRoute.LOCAL_KNOWLEDGE,
+        IntentRoute.TECHNICAL_CONCEPT,
+    }:
         evidence_blocks: list[str] = []
         source_types: list[str] = []
-        if decision.route is IntentRoute.LOCAL_SYSTEM:
+        if decision.route is IntentRoute.LOCAL_RUNTIME:
             evidence_blocks.append(build_runtime_config_evidence(provider_settings))
             source_types.append("local_config")
-        recent_user_messages = _get_recent_user_messages(req)
-        active_entries = activate_lorebook(load_lorebook(), recent_user_messages)
-        if active_entries:
-            evidence_blocks.append(build_local_evidence_prompt(active_entries))
-            source_types.extend(entry.source_type for entry in active_entries)
+        else:
+            recent_user_messages = _get_recent_user_messages(req)
+            active_entries = activate_lorebook(load_lorebook(), recent_user_messages)
+            if active_entries:
+                evidence_blocks.append(build_local_evidence_prompt(active_entries))
+                source_types.extend(entry.source_type for entry in active_entries)
         if evidence_blocks:
             req.extra_user_content_parts.append(
                 TextPart(text="\n\n".join(evidence_blocks))
@@ -1740,13 +1776,13 @@ async def build_main_agent(
 
     await _decorate_llm_request(event, req, plugin_context, config, provider=provider)
 
+    await _apply_verified_factual_reply_policy(event, req, plugin_context, provider)
     await _apply_kb(event, req, plugin_context, config)
 
     if not req.session_id:
         req.session_id = event.unified_msg_origin
 
     _plugin_tool_fix(event, req)
-    await _apply_verified_factual_reply_policy(event, req, plugin_context, provider)
     await _apply_web_search_tools(event, req, plugin_context)
 
     if config.llm_safety_mode:

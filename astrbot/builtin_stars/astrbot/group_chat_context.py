@@ -50,6 +50,7 @@ class GroupChatContext:
         self._record_ids: dict[str, deque[str]] = defaultdict(deque)
         self._last_active_reply_at: dict[str, float] = {}
         self._human_takeover_until: dict[str, float] = {}
+        self._last_account_activity_at: dict[str, float] = {}
         self._member_mute_until: dict[str, float] = {}
 
     def _get_lock(self, umo: str) -> asyncio.Lock:
@@ -182,7 +183,9 @@ class GroupChatContext:
                 return should_reply
         return False
 
-    def should_suppress_group_bot_reply(self, event: AstrMessageEvent) -> bool:
+    async def should_suppress_group_bot_reply(
+        self, event: AstrMessageEvent
+    ) -> bool:
         """Suppress replies during human takeover or a member-requested hush.
 
         Both timers are deliberately in-memory and scoped to one UMO. Explicit
@@ -205,6 +208,7 @@ class GroupChatContext:
         umo = event.unified_msg_origin
         if event.get_extra("handlers_parsed_params", {}):
             return False
+        await self._refresh_human_takeover_from_account_activity(event, cfg, now)
         if now < self._human_takeover_until.get(umo, 0.0):
             logger.info(
                 f"human_takeover | event=reply_suppressed | scope_ref={_scope_ref(umo)}"
@@ -218,6 +222,61 @@ class GroupChatContext:
                 self._member_mute_until[umo] = now + mute_seconds
 
         return now < self._member_mute_until.get(umo, 0.0)
+
+    async def _refresh_human_takeover_from_account_activity(
+        self,
+        event: AstrMessageEvent,
+        cfg: dict,
+        monotonic_now: float,
+    ) -> None:
+        getter = getattr(event, "get_group_account_activity", None)
+        if not callable(getter):
+            return
+        try:
+            activity = await getter()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "human_takeover | event=activity_probe_failed "
+                f"| error={type(exc).__name__}"
+            )
+            return
+        if not isinstance(activity, dict):
+            return
+        try:
+            account_last_sent_at = float(activity["account_last_sent_at"])
+            observed_at = float(activity["observed_at"])
+            bot_last_sent_raw = activity.get("bot_last_sent_at")
+            bot_last_sent_at = (
+                float(bot_last_sent_raw) if bot_last_sent_raw is not None else None
+            )
+        except (KeyError, TypeError, ValueError):
+            return
+
+        umo = event.unified_msg_origin
+        previous = self._last_account_activity_at.get(umo)
+        self._last_account_activity_at[umo] = max(
+            account_last_sent_at,
+            previous or 0.0,
+        )
+        if previous is not None and account_last_sent_at <= previous:
+            return
+        if bot_last_sent_at is None and previous is None:
+            return
+        if bot_last_sent_at is not None and account_last_sent_at <= bot_last_sent_at:
+            return
+
+        takeover_seconds = cfg["ar_human_takeover_seconds"]
+        age = max(0.0, observed_at - account_last_sent_at)
+        if age >= takeover_seconds:
+            return
+        self._human_takeover_until[umo] = max(
+            self._human_takeover_until.get(umo, 0.0),
+            monotonic_now + takeover_seconds - age,
+        )
+        logger.info(
+            "human_takeover | event=activity_detected "
+            f"| scope_ref={_scope_ref(umo)} | age_seconds={age:.1f}"
+        )
 
     def _is_relevant_message(self, event: AstrMessageEvent, cfg: dict) -> bool:
         text = event.message_str.strip()
@@ -283,6 +342,7 @@ class GroupChatContext:
         self._locks.pop(umo, None)
         self._last_active_reply_at.pop(umo, None)
         self._human_takeover_until.pop(umo, None)
+        self._last_account_activity_at.pop(umo, None)
         self._member_mute_until.pop(umo, None)
         return cnt
 
