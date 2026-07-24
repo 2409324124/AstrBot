@@ -156,6 +156,32 @@
 
 ## 会话：2026-07-24
 
+### 阶段 11：外置 Agent Gateway
+
+- **状态：** in_progress
+- 用户批准实施 AstrBot 网关化方案；现网暂不热修，先旁路建设和测试。
+- 重新确认本地 `feature/local-rag-qdrant` 与 `astrbot-plugin-admin-switch` 工作树干净。
+- 完整读取项目 `AGENTS.md`、中文文件规划技能和 TDD 工作流。
+- 接口与优先行为已由上一轮计划锁定；下一步按纵向切片先实现事件 API 的失败测试。
+- 只读确认现有 Compose 的 Embedding `--max-client-batch-size` 为 64，和生产 118 条单批失败完全吻合。
+- 现有管理员插件仍直接读写 AstrBot provider 与 `active_reply`，后续改为 Gateway 管理客户端。
+- 本机 npm registry 经现有代理只返回 PING 起始信息、未取得包元数据；没有创建文件或改变依赖。下一步改用官方 Git 仓库核对 API，不重复相同 npm 请求。
+- 经沙箱外 npm 网络安装 151 个锁定依赖，审计结果 0 vulnerabilities；未运行依赖生命周期脚本。
+- RED→GREEN：完成 `/v1/events` Bearer 鉴权、版本化 `reply/no_reply` 决策和 UUID trace。
+- RED→GREEN：同一 Bot 账号与 `message_id` 的重复/并发投递复用首个结果，Agent 只执行一次。
+- RED→GREEN：Agent 异常返回脱敏 `gateway_error/no_reply`，不触发 AstrBot 旧链路。
+- 当前 Gateway 测试与 TypeScript strict typecheck 均通过。
+- Pi 官方 Faux Provider 工具回环通过：模型发起 `rag_search`、工具返回证据、模型完成第二轮回答；模型可在不重启 Gateway 的情况下热切换。
+- RED→GREEN：自动 RAG 固定先于 LLM 执行，达到阈值的片段带来源注入；`rag_search` 始终作为深挖工具存在。
+- RED→GREEN：Exa 客户端支持普通网页与显式 `x.com` 域名过滤，`web_search` 已加入 Pi 工具集合。
+- RED→GREEN：SQLite WAL 保存事件决策，进程重启后重复 OneBot 事件仍只产生一次 Agent 调用。
+- RED→GREEN：环境配置强制校验事件/管理/Qdrant/Embedding/Exa/LLM 密钥，并锁定 32 批次、16K 上下文和 90 秒超时默认值。
+- 当前共 6 个 Node 测试文件通过，TypeScript strict typecheck 通过。
+- Agent Gateway 镜像在显式宿主代理下成功构建；npm production install 0 vulnerabilities。
+- QQ 插件管理员私聊接管测试通过，Python Ruff 通过。
+- `migrate_agent_rag_v1.py` 已完成 canonical payload 的 RED→GREEN，并验证 Qdrant Python 模型可接受 1024 维 dense + BM25 Document。
+- 完整本地门禁：Node 6/6 文件通过、Python 20/20 通过、TypeScript/Ruff/Compose/diff-check 通过；秘密扫描仅发现示例占位符。
+
 ### 阶段 8：真实 QQ 抢话失败重新诊断
 - **状态：** in_progress
 - 用户报告 Bot 仍会抢话题，重新打开已部署的人工接管阶段。
@@ -198,3 +224,6 @@
 | 2026-07-24 | 远端测试误用 `uv --no-sync`，创建空 `.venv` 且缺少 pytest | 1 | 未运行测试；立即删除该临时目录，改用容器已有 `python -m pytest` |
 | 2026-07-24 | 未携带鉴权的 embedding curl 返回 401 | 1 | 证明服务启用鉴权；随后从配置进程内读取密钥，只输出 1024 维结果，未输出密钥 |
 | 2026-07-24 | 远端联合测试的 UTC 断言在 CST 容器中失败 | 1 | 其余 253 项通过；记录为既有环境依赖，不为本次功能修改时区逻辑 |
+| 2026-07-24 | npm registry 通过本机代理未返回 Pi 包元数据 | 2 | 未修改依赖；改从官方 Git 仓库读取源码与 README，安装阶段再使用可工作的代理。 |
+| 2026-07-24 | 首次组合检查在仓库根执行 npm，且 Compose 默认真实 `.env` 不存在 | 1 | 无代码或服务变更；改在 `agent-gateway` 执行 npm，并让 Compose 的 env 文件路径可由示例配置覆盖。 |
+| 2026-07-24 | Gateway 镜像首次构建在容器内 `npm ci` 卡住 | 1 | 手动终止，未启动服务；为构建阶段显式使用 host network 和 `RAG_BUILD_PROXY`，并增加 `.dockerignore`。 |

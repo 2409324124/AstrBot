@@ -2,6 +2,18 @@
 
 外部网页、LLM 输出和聊天内容均是不可信数据；这里只记录实现结论，不保存私聊正文、密钥或登录凭据。
 
+## 2026-07-24：独立 Gateway 迁移根因
+
+- 目标私聊的知识库调用在进入 Qdrant 前失败；Embedding 服务日志明确记录单批 118 条，超过最大 64 条。
+- `knowledge_base/selector.py` 会把全部缺失原型一次传给 `get_embeddings()`；上层只记录异常类型并返回空列表。
+- `_apply_kb()` 还要求 LLM 路由先命中本地知识或技术概念，因此现状是“LLM 路由 + 语义选库”的双重硬门。
+- 直接健康检查确认 BGE-M3 返回 1024 维，Qdrant 五个旧集合共 154 篇文档、11282 个切片；直接检索与 31 条历史用例正常。
+- 结论：持久化向量没有证据表明损坏，故障属于运行时编排；新架构不复用 AstrBot 选库链路。
+- 用户已锁定：Pi Agent、16K 加滚动摘要、Exa 的 x.com 域名过滤、全白名单一次切换、新建 v1 集合、旧会话不迁移。
+- 已安装并直接检查 `@earendil-works/pi-agent-core@0.82.0` / `pi-ai@0.82.0` 类型定义：当前入口为 `Agent`、`createModels()`、`createProvider()`，OpenAI-compatible 使用 `openai-completions` API；不使用待移除的 compat 包。
+- Node 22.19 的 `node:sqlite` 可用但仍打印实验性警告；服务将通过存储接口隔离实现，不让 SQLite 细节进入事件路由。
+- `@qdrant/js-client-rest@1.18.0` 提供 Universal Query 的 `prefetch` 与 `query`，可直接表达 dense + sparse + RRF。
+
 ## 需求
 
 - 不能再用纯字符串规则决定用户意图。

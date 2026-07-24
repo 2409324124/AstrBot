@@ -6,7 +6,7 @@
 
 ## 当前阶段
 
-阶段 9：知识库路由与输入预算修复；并行重新诊断阶段 8 的真实 QQ 抢话失败
+阶段 11：把 AstrBot 降级为 QQ 网关，旁路实现独立 Agent Gateway 与混合 RAG
 
 ## 各阶段
 
@@ -106,6 +106,18 @@
 - [ ] 提交并推送到 `fork/feature/local-rag-qdrant`
 - **状态：** in_progress
 
+### 阶段 11：独立 Agent Gateway 与 RAG 迁移
+
+- [x] RED→GREEN：TypeScript Gateway 事件接口、幂等和 fail-closed 契约
+- [x] RED→GREEN：Pi Agent 的 OpenAI-compatible 流式调用、工具循环、超时和模型切换
+- [x] RED→GREEN：独立 Qdrant dense + BM25 + RRF 自动召回与 `rag_search` 工具
+- [x] RED→GREEN：QQ 网关插件的私聊权限、人工接管和明确唤醒
+- [ ] 管理员插件改为调用 Gateway 的模型与白名单管理接口
+- [ ] 运行迁移脚本新建 `agent_rag_v1`；脚本与 payload 契约已完成，旧集合保持只读
+- [ ] 完成 31 条历史检索、负例、联网搜索、权限、重复事件和故障回归
+- [ ] 远端旁路部署、备份、一次性切换白名单会话并验证回滚开关
+- **状态：** in_progress
+
 ## 已做决策
 
 | 决策 | 理由 |
@@ -121,6 +133,11 @@
 | 选库使用本地 BGE-M3 多原型相似度 | 不增加第二次 LLM 调用；名称、描述和文档标题共同降低错库概率。 |
 | 主模型输入硬预算为 16384 tokens | 最近实际请求达到约 5.6 万 token 并耗时 25.8 秒。 |
 | 号主接管阶段重新打开 | 用户真实 QQ 测试证明上一轮“代码完成”的结论不成立，必须重新从入口证据定位。 |
+| AstrBot 只保留 QQ 网关职责 | 现有 RAG 在调用 Qdrant 前被 LLM 路由和知识库选择器双重截断，继续修改核心会扩大耦合与回归面。 |
+| Agent Gateway 使用 TypeScript、Fastify 与 Pi Agent 0.82.0 | 用户已确认框架；通过内部运行时接口隔离快速变化的依赖。 |
+| 自动 RAG 不受 LLM 意图路由控制 | 每个有效问题先检索，再由证据阈值决定是否注入；模型仍可调用 `rag_search` 深挖。 |
+| 新建 `agent_rag_v1` 且不迁移旧聊天历史 | 用户要求新会话开始；旧 Qdrant 集合与 AstrBot 数据只读保留用于回滚。 |
+| 一次性切换全部白名单会话 | 先旁路验收，切换失败时通过单一开关恢复旧路径。 |
 
 ## 已知风险与错误
 

@@ -33,12 +33,16 @@ services:
       QDRANT_API_KEY: ${QDRANT_API_KEY:?QDRANT_API_KEY is required}
       QDRANT_HOST_URL: ${ASTRBOT_QDRANT_URL:-http://qdrant:6333}
       RAG_DATA_ROOT: /rag-data
+      AGENT_GATEWAY_ENABLED: ${AGENT_GATEWAY_ENABLED:-false}
+      AGENT_GATEWAY_URL: ${AGENT_GATEWAY_URL:-http://agent-gateway:8090}
+      AGENT_GATEWAY_TOKEN: ${AGENT_GATEWAY_TOKEN:-disabled}
     volumes:
       # The base image does not contain this fork's source tree. Keep runtime
       # code aligned with the checked-out branch while compose.yml retains its
       # more-specific /AstrBot/data mount for persistent state.
       - ${ASTRBOT_SOURCE_ROOT:-/home/miku/astrbot-deploy/AstrBot}:/AstrBot
       - ${RAG_DATA_ROOT:?RAG_DATA_ROOT is required}:/rag-data
+      - ${ASTRBOT_SOURCE_ROOT:-/home/miku/astrbot-deploy/AstrBot}/astrbot_plugin_agent_gateway:/AstrBot/data/plugins/astrbot_plugin_agent_gateway:ro
     networks:
       - default
       - astrbot-rag

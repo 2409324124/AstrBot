@@ -48,6 +48,31 @@ services:
         aliases:
           - embedding-server
 
+  agent-gateway:
+    build:
+      context: ../agent-gateway
+      network: host
+      args:
+        HTTP_PROXY: ${RAG_BUILD_PROXY:-}
+        HTTPS_PROXY: ${RAG_BUILD_PROXY:-}
+    container_name: astrbot-agent-gateway
+    restart: unless-stopped
+    env_file:
+      - ${AGENT_GATEWAY_ENV_FILE:-../agent-gateway/.env}
+    ports:
+      - "127.0.0.1:8090:8090"
+    volumes:
+      - ${RAG_DATA_ROOT:?RAG_DATA_ROOT is required}/gateway:/data
+    depends_on:
+      qdrant:
+        condition: service_started
+      embedding-server:
+        condition: service_started
+    networks:
+      rag:
+        aliases:
+          - agent-gateway
+
 networks:
   rag:
     name: astrbot-rag

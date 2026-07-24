@@ -46,6 +46,37 @@ def test_migration_reads_chunks_without_changing_source(tmp_path) -> None:
     assert db_path.read_bytes() == before
 
 
+def test_v1_migration_flattens_payload_without_losing_source_metadata() -> None:
+    module = load_script("migrate_agent_rag_v1.py")
+
+    payload = module.canonical_payload(
+        "kb-server",
+        {
+            "doc_id": "chunk-1",
+            "text": "Xeon Max 9470C",
+            "metadata": {
+                "kb_doc_id": "document-1",
+                "file_name": "server.md",
+                "chunk_index": 4,
+            },
+        },
+    )
+
+    assert payload == {
+        "kb_id": "kb-server",
+        "doc_id": "document-1",
+        "chunk_id": "chunk-1",
+        "text": "Xeon Max 9470C",
+        "source": "server.md",
+        "chunk_index": 4,
+        "metadata": {
+            "kb_doc_id": "document-1",
+            "file_name": "server.md",
+            "chunk_index": 4,
+        },
+    }
+
+
 def test_backend_switch_is_atomic_and_keeps_backup(tmp_path) -> None:
     """Cutover updates only the backend setting and preserves the old env file."""
     env_file = tmp_path / ".env"
