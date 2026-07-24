@@ -26,7 +26,7 @@ sudo docker exec astrbot python \
 
 sudo docker exec astrbot python \
   /AstrBot/rag-stack/scripts/verify_agent_rag.py \
-  --collection agent_rag_v1 --top-k 8
+  --collection agent_rag_v1 --top-k 16
 ```
 
 The migration reads `kb.db` in SQLite read-only mode to resolve document names,

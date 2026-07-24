@@ -11,7 +11,7 @@ test("Gateway agent retrieves evidence before calling the LLM", async () => {
       search: async (query, options) => {
         order.push("rag");
         assert.equal(query, "我的服务器CPU是什么？");
-        assert.deepEqual(options, { topK: 8 });
+        assert.deepEqual(options, { topK: 16 });
         return [{
           id: "chunk-1",
           score: 0.91,
@@ -113,6 +113,63 @@ test("Gateway agent exposes web search with x.com filtering", async () => {
 
   assert.deepEqual(searchOptions, { domains: ["x.com"], maxResults: 5 });
   assert.equal(decision.action, "reply");
+});
+
+test("RAG tool uses the accepted depth without overflowing tool context", async () => {
+  let toolSearchOptions;
+  let ragCalls = 0;
+  const agent = new GatewayAgent({
+    rag: {
+      search: async (_query, options) => {
+        ragCalls += 1;
+        if (ragCalls === 1) {
+          return [];
+        }
+        toolSearchOptions = options;
+        return Array.from({ length: options.topK }, (_, index) => ({
+          id: `chunk-${index}`,
+          score: 0.8,
+          text: `切片${index}${"X".repeat(700)}`,
+          source: `source-${index}.md`,
+          kbId: "test"
+        }));
+      }
+    },
+    exa: { search: async () => [] },
+    runtime: {
+      run: async (input) => {
+        const tool = input.tools.find((candidate) => candidate.name === "rag_search");
+        assert.ok(tool);
+        const result = await tool.execute(
+          "tool-rag",
+          { query: "详细检索" },
+          new AbortController().signal
+        );
+        assert.ok([...result.content[0].text].length <= 6000);
+        return {
+          text: "检索完成",
+          usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: {} }
+        };
+      }
+    },
+    evidenceThreshold: 0.2
+  });
+
+  await agent.handle({
+    schema_version: "1",
+    message_id: "rag-depth-1",
+    umo: "private:1",
+    chat_type: "private",
+    sender_id: "1",
+    self_id: "bot",
+    text: "深入研究",
+    mentions: [],
+    timestamp: 1784860800000,
+    is_admin: true,
+    owner_takeover_active: false
+  });
+
+  assert.deepEqual(toolSearchOptions, { topK: 16 });
 });
 
 test("Gateway agent injects and records persistent conversation context", async () => {

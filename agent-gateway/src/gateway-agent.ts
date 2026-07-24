@@ -104,13 +104,13 @@ export class GatewayAgent {
   }
 
   async #handleSerial(event: GatewayEvent): Promise<GatewayDecision> {
-    const initialHits = await this.#rag.search(event.text, { topK: 8 });
+    const initialHits = await this.#rag.search(event.text, { topK: 16 });
     const evidence = initialHits.filter(
       (hit) => hit.score >= this.#evidenceThreshold,
     );
     const ragParameters = Type.Object({
       query: Type.String({ minLength: 1 }),
-      top_k: Type.Optional(Type.Integer({ minimum: 1, maximum: 12 })),
+      top_k: Type.Optional(Type.Integer({ minimum: 1, maximum: 24 })),
     });
     const ragTool: AgentTool<typeof ragParameters, { hitCount: number }> = {
       name: "rag_search",
@@ -119,18 +119,19 @@ export class GatewayAgent {
       parameters: ragParameters,
       execute: async (_toolCallId, params) => {
         const hits = await this.#rag.search(params.query, {
-          topK: params.top_k ?? 8,
+          topK: params.top_k ?? 16,
         });
+        const toolEvidence = hits
+          .map(
+            (hit, index) =>
+              `[${index + 1}] ${hit.text}\n来源: ${hit.source}`,
+          )
+          .join("\n\n");
         return {
           content: [
             {
               type: "text",
-              text: hits
-                .map(
-                  (hit, index) =>
-                    `[${index + 1}] ${hit.text}\n来源: ${hit.source}`,
-                )
-                .join("\n\n"),
+              text: head(toolEvidence, 6000),
             },
           ],
           details: { hitCount: hits.length },

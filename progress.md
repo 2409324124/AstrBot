@@ -241,6 +241,8 @@
 | 2026-07-24 | 在仓库根目录运行 Gateway `npm` 检查 | 1 | Python/Ruff 已通过；Node 任务改到 `agent-gateway/` 目录单独执行，不再重复根目录命令。 |
 | 2026-07-24 | Git 提交被平台审批额度拦截 | 1 | 未绕过审批；已测修复保留在工作树，继续本地可逆实现，等用户新授权后统一提交/同步。 |
 | 2026-07-24 | 本机不存在远端绝对路径的 AstrBot Compose 基底 | 1 | Gateway Compose 直接通过；AstrBot override 用最小临时基底验证后通过，临时文件已删除。 |
+| 2026-07-25 | 首次读取 TDD 技能时少了 `ok-skills/` 路径层级 | 1 | 未改代码；按技能目录映射改读 `/home/miku/.agents/skills/ok-skills/tdd/SKILL.md` 并完整读取。 |
+| 2026-07-25 | Top-16 工具测试首版无法区分自动检索与工具检索 | 1 | 实现已使两者都为 16；测试改为用公开调用次序区分两次检索，然后确认默认深度和 6000 字符上限均转绿。 |
 
 ## 2026-07-24：Gateway 管理面与会话记忆
 
@@ -257,3 +259,13 @@
 
 - 用户确认平台额度已恢复，授权继续提交与后续部署。
 - 提交前状态复核：当前分支 `feature/local-rag-qdrant`，基线 `0e310fe`，工作树只包含计划内 Gateway/RAG/插件/文档与测试更改。
+- 提交 `6e3648f` 已创建并推送至 `fork/feature/local-rag-qdrant`，推送后本地工作树干净。
+- 远端同步前确认代码位于 `0e310fe` 且工作树干净；AstrBot、NapCat、Embedding、Qdrant 与旧 Gateway 均运行。
+- 远端空间：系统盘可用 152GB，PM983 可用 527GB。
+- 新建部署前备份 `/home/miku/astrbot-deploy/backups/agent-gateway-20260724T165557Z`，包含源码 bundle、0600 配置和停止旧 Gateway 后一致复制的 SQLite 文件；Gateway 随后已恢复运行。
+- 新建 AstrBot/SQLite/Qdrant 快照 `/mnt/PM983/astrbot-rag/snapshots/astrbot-rag-20260724T165725Z`。
+- 远端通过 20KB 增量 bundle 从 `0e310fe` 快进到 `6e3648f`，快进前无本地改动。
+- 从 AstrBot 运行配置自动导入 5 个现有群白名单，并将 Gateway 管理 token 只在未跟踪 env 中连接；未输出 token。
+- 幂等重跑 `agent_rag_v1` 迁移完成：处理 11282 点，集合总数不变，旧集合未删除。
+- 首次 31 条真实混合检索验收（Top-8）为 26/31；5 条失败均已命中预期文档，但预期术语分散在未进入 Top-8 的其他切片。暂不切换 QQ，继续测试 Top-12/16 与分组召回策略。
+- 同一验收在 Top-12 为 30/31，Top-16 为 31/31。决定将生产自动候选提升到 16，但保持现有 16K 硬 prompt 预算，并限制手动 `rag_search` 输出，避免候选增加变成 token 无界增长。

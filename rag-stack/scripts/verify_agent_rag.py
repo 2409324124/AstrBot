@@ -115,7 +115,7 @@ async def main() -> int:
         ),
     )
     parser.add_argument("--collection", default="agent_rag_v1")
-    parser.add_argument("--top-k", type=int, default=8)
+    parser.add_argument("--top-k", type=int, default=16)
     args = parser.parse_args()
     if not 1 <= args.top_k <= 32:
         raise SystemExit("top-k must be between 1 and 32")
