@@ -26,6 +26,7 @@ test("Intent router returns a validated semantic route without tools or history"
   });
   assert.equal(runInput.tools.length, 0);
   assert.match(runInput.systemPrompt, /semantic meaning/i);
+  assert.match(runInput.systemPrompt, /我的服务器CPU.*local_knowledge/);
   assert.match(runInput.prompt, /<untrusted_user_message>/);
   assert.doesNotMatch(runInput.prompt, /对话记忆|本地证据/);
 });

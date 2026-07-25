@@ -206,7 +206,7 @@ test("Gateway agent does not present stored documents as live runtime state", as
   });
 
   assert.equal(ragCalls, 0);
-  assert.equal(runInput.tools.length, 0);
+  assert.deepEqual(runInput.tools.map((tool) => tool.name), ["rag_search"]);
   assert.doesNotMatch(runInput.systemPrompt, /已经执行了本地知识检索/);
   assert.match(runInput.systemPrompt, /实时状态/);
 });

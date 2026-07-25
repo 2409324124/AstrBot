@@ -259,13 +259,13 @@ export class GatewayAgent {
       .join("\n\n");
     const tools = intent.isFallback
       ? [ragTool, webTool]
-      : intent.route === "chat_creative" || intent.route === "local_runtime"
+      : intent.route === "chat_creative"
         ? []
         : intent.route === "external_fact"
           ? [webTool]
-          : intent.route === "local_knowledge"
-            ? [ragTool]
-            : [ragTool, webTool];
+          : intent.route === "technical_concept"
+            ? [ragTool, webTool]
+            : [ragTool];
     const result = await this.#runtime.run({
       sessionId: event.umo,
       systemPrompt: intent.isFallback
