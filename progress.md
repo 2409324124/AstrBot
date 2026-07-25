@@ -255,6 +255,7 @@
 | 2026-07-25 | 构建 PTY 首次 yield 后过早检查镜像标签，镜像尚不存在 | 1 | 后续先轮询原构建会话至明确退出，再检查镜像。 |
 | 2026-07-25 | 首轮远端 canary 将“我的服务器 CPU”当作 `local_runtime`，未召回 9470C | 1 | 正式服务未替换；补硬件清单→`local_knowledge` 语义边界，并让 `local_runtime` 保留按需 RAG 工具但不自动注入。 |
 | 2026-07-25 | 修改 local_runtime 断言时首次命中同文件更早的闲聊断言，随后测试命令又在仓库根误用相对路径 | 2 | 未改生产；按测试名定位两处断言并恢复闲聊无工具、runtime 仅 RAG，后续固定在 `agent-gateway/` 运行 Node 测试。 |
+| 2026-07-25 | 远端 Snap Docker/BuildKit 无法从 `/tmp` 读取增量 Dockerfile | 1 | 未构建镜像；改把同一 144 字节文件放到用户 home 下的部署临时目录，不重复 `/tmp` 路径。 |
 
 ## 2026-07-24：Gateway 管理面与会话记忆
 
@@ -307,3 +308,9 @@
 - 路由器只接收当前不可信消息、无对话历史、无工具，严格验证五类 JSON；支持模型在 Markdown 代码块中返回唯一 JSON 对象。
 - 增加独立路由模型、30 秒超时和 512 输出 token 配置；真实 128 token 探针曾被 reasoning 完全耗尽，因此示例配置不允许更小默认值。
 - 本地完整 Gateway 门禁：8 个 Node 测试文件通过，TypeScript strict 与 `git diff --check` 通过。
+- 提交 `eea5211` 完成初版路由并推送；首轮 canary 餐饮路径正确，但发现 CPU 硬件边界回归，正式服务未切换。
+- RED→GREEN 修复硬件边界后提交 `3db6502` 并推送；第二版 canary：餐饮 2.06 秒无 RAG 痕迹，CPU 2.04 秒命中 9470C/有效来源，外部事实 20.38 秒含 URL 且无本地来源。
+- 部署前停止旧 Gateway 做一致 SQLite 备份，路径为 `/home/miku/astrbot-deploy/backups/agent-intentfix-20260725T082155Z`；旧镜像标签为 `astrbot-rag-agent-gateway:pre-intentfix-20260725T082155Z`。
+- 正式 Gateway 已切换到 `3db6502` 镜像；正式餐饮/CPU E2E 分别约 2.09 秒和 2.52 秒，所有断言通过。
+- 仅 Gateway 被重建；AstrBot、NapCat、Qdrant、Embedding 启动时间保持不变，五个容器均 running/restart_count=0，Gateway 近十分钟错误计数为 0。
+- 管理 SQLite 仍为 `deepseek-v4-pro` 与 5 个群白名单；远端源码 HEAD `3db6502`、工作树 clean。
