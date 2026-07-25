@@ -11,6 +11,7 @@ import { createApp } from "./app.ts";
 import { loadConfig } from "./config.ts";
 import { ExaSearchClient } from "./exa.ts";
 import { GatewayAgent } from "./gateway-agent.ts";
+import { RuntimeIntentRouter } from "./intent-router.ts";
 import { ConversationMemory } from "./memory.ts";
 import { PiAgentRuntime } from "./pi-runtime.ts";
 import { HybridRag, OpenAIEmbeddingClient } from "./rag.ts";
@@ -57,6 +58,12 @@ export function buildApp(env: NodeJS.ProcessEnv) {
       thinkingFormat: "deepseek",
     },
   };
+  const routerModel: Model<"openai-completions"> = {
+    ...model,
+    id: config.routerModel,
+    name: config.routerModel,
+    maxTokens: config.routerMaxOutputTokens,
+  };
   const provider = createProvider({
     id: "gateway-openai-compatible",
     name: "Gateway OpenAI-compatible",
@@ -70,7 +77,8 @@ export function buildApp(env: NodeJS.ProcessEnv) {
         }),
       },
     },
-    models: [model],
+    models:
+      routerModel.id === model.id ? [model] : [model, routerModel],
     api: { stream, streamSimple },
   });
   const models = createModels();
@@ -80,7 +88,13 @@ export function buildApp(env: NodeJS.ProcessEnv) {
     model,
     timeoutMs: config.agentTimeoutMs,
   });
+  const routerRuntime = new PiAgentRuntime({
+    models,
+    model: routerModel,
+    timeoutMs: config.routerTimeoutMs,
+  });
   const gatewayAgent = new GatewayAgent({
+    router: new RuntimeIntentRouter({ runtime: routerRuntime }),
     rag,
     runtime,
     exa: new ExaSearchClient({ apiKey: config.exaApiKey }),

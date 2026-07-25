@@ -249,6 +249,10 @@
 | 2026-07-25 | 首次 SQLite 诊断误查不存在的 `reason_code` 列，紧接的 JSON SQL 命令又有 shell 引号错误 | 2 | 未改数据；按真实 schema 只读取 `response_json`，在 Node 内解析并只输出 `reason_code`。 |
 | 2026-07-25 | 插件精确回归命令引用了不存在的 `test_agent_gateway_client.py` | 1 | pytest 未执行任何测试；先用 `rg --files` 确认可用文件，再运行真实插件测试 4/4 与 Ruff。 |
 | 2026-07-25 | 首次正式切流时插件元数据作者被 YAML 解析为整数 | 1 | 插件仍加载但产生校验警告；RED 测试复现后给纯数字作者加引号，GREEN 4/4，重新仅重建 AstrBot 后警告归零。 |
+| 2026-07-25 | 首次隔离意图探针把 completion 上限设为 128，推理模型返回空 `content` | 1 | 不重复原参数；改为 512 并记录 finish/usage，得到 `chat_creative/0.95`，其中 194 tokens 被 reasoning 消耗。 |
+| 2026-07-25 | 本机普通用户首次构建修复镜像无法访问 Docker socket | 1 | 未构建；使用已授权的限定 `docker build` 权限继续。 |
+| 2026-07-25 | 修复镜像的联网 `npm ci` 在 70 秒后触发 npm CLI `Exit handler never called` | 1 | 未产出镜像且不重复相同下载；依赖锁文件未变，改以已验证 `7995b30` 镜像为基础只覆盖源码，离线构建。 |
+| 2026-07-25 | 构建 PTY 首次 yield 后过早检查镜像标签，镜像尚不存在 | 1 | 后续先轮询原构建会话至明确退出，再检查镜像。 |
 
 ## 2026-07-24：Gateway 管理面与会话记忆
 
@@ -285,3 +289,19 @@
 - 已将未跟踪回滚开关 `AGENT_GATEWAY_ENABLED=true`，只重建 AstrBot；NapCat、Gateway、Qdrant、Embedding 全部 running、restart_count=0。
 - 插件作者元数据完成 RED→GREEN 修复并再次只重建 AstrBot；插件加载成功，三分钟 ERROR/Traceback/Exception/元数据校验失败计数为 0。
 - 阶段 11 的远端部署与一次性切流已完成；尚需用户从真实 QQ 发送一条管理员私聊和一个白名单群唤醒作为最终传输层烟测。
+
+## 2026-07-25：763898834 群意图错误诊断
+
+- 用户报告该群出现明显意图识别错误；按系统化诊断流程先收集入口、决策、RAG、工具与回复边界证据，不直接修改代码。
+- 隐私边界：只读取该群近期必要事件，审计文档不保存群聊正文、QQ 昵称或凭据。
+- 只读 SQLite 定位到该群两轮近期餐饮闲聊；Gateway 均正常回复，但错误声称本地知识库没有资料。
+- 源码回溯确认 Gateway 没有意图分类阶段：所有事件无条件 Top-16 RAG，系统提示统一声明已做本地检索。
+- 真实召回复现：两个闲聊查询的 Top-1 无关片段均为 0.5，且阈值只有 0.03；正常 CPU 查询正确结果为 0.7/0.5208，证明 RRF 分数不是可直接阈值化的语义置信度。
+- 隔离分类探针把同类请求正确判为 `chat_creative/0.95`，确认模型能力正常、故障在 Gateway 编排。
+- 未修改生产服务或配置；等待用户确认修复范围后进入 TDD。
+- 用户明确授权修复。RED→GREEN：粤语餐饮闲聊现在先经隔离语义路由，`chat_creative` 不调用 RAG、不暴露搜索工具，也不再收到“已经查询知识库”的系统提示。
+- RED→GREEN：路由非法输出/异常进入 `isFallback=true`，不自动注入 RAG，但同时保留 `rag_search` 与 `web_search`，避免分类器重新成为知识库硬门。
+- RED→GREEN：`external_fact` 跳过本地 RAG且只开放网页搜索；`local_runtime` 不把持久化文档伪装成实时状态；`local_knowledge`/`technical_concept` 才自动执行混合检索。
+- 路由器只接收当前不可信消息、无对话历史、无工具，严格验证五类 JSON；支持模型在 Markdown 代码块中返回唯一 JSON 对象。
+- 增加独立路由模型、30 秒超时和 512 输出 token 配置；真实 128 token 探针曾被 reasoning 完全耗尽，因此示例配置不允许更小默认值。
+- 本地完整 Gateway 门禁：8 个 Node 测试文件通过，TypeScript strict 与 `git diff --check` 通过。

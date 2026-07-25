@@ -26,7 +26,25 @@ type MemoryPort = {
   record: (sessionId: string, user: string, assistant: string) => void;
 };
 
+export type IntentRoute =
+  | "local_runtime"
+  | "local_knowledge"
+  | "technical_concept"
+  | "external_fact"
+  | "chat_creative";
+
+export type IntentDecision = {
+  route: IntentRoute;
+  confidence: number;
+  isFallback: boolean;
+};
+
+type IntentRouterPort = {
+  classify: (text: string) => Promise<IntentDecision>;
+};
+
 type GatewayAgentOptions = {
+  router: IntentRouterPort;
   rag: RagPort;
   runtime: RuntimePort;
   exa: ExaPort;
@@ -39,6 +57,26 @@ const SYSTEM_PROMPT = `你是东云bot。回答前已经执行了本地知识检
 只把标为“本地证据”的内容当作本地知识，不得伪造来源。
 若证据不足，可调用 rag_search 改写查询继续检索。
 普通闲聊尽量不超过20个中文字符；技术内容按需要完整回答。
+不要自行添加 AI 内容标记，网关会统一添加。`;
+
+const CHAT_SYSTEM_PROMPT = `你是东云bot。自然回应普通聊天、个人意见与开放式社交互动。
+不要把闲聊当作知识库问答，也不要声称查询过本地知识库。
+普通闲聊尽量不超过20个中文字符。
+不要自行添加 AI 内容标记，网关会统一添加。`;
+
+const FALLBACK_SYSTEM_PROMPT = `你是东云bot。意图路由暂时无法给出可信结论。
+不要假装已经搜索；仅在确有需要时调用本地知识或网页搜索工具。
+如果问题含糊，先自然回应或请求澄清。
+不要自行添加 AI 内容标记，网关会统一添加。`;
+
+const EXTERNAL_SYSTEM_PROMPT = `你是东云bot。这个问题依赖当前外部事实。
+回答事实前必须调用网页搜索，并在答案中保留可核验的来源 URL。
+如果搜索失败或来源不足，明确说明尚未核验，不要用本地知识库替代当前事实。
+不要自行添加 AI 内容标记，网关会统一添加。`;
+
+const LOCAL_RUNTIME_SYSTEM_PROMPT = `你是东云bot。这个问题询问当前部署的实时状态。
+本轮没有自动注入实时配置或日志；只能使用对话中已经明确提供的状态。
+证据不足时直接说明无法核验，不要把历史文档或一般知识伪装成实时状态。
 不要自行添加 AI 内容标记，网关会统一添加。`;
 
 function length(text: string): number {
@@ -69,6 +107,7 @@ function tail(text: string, limit: number): string {
 }
 
 export class GatewayAgent {
+  readonly #router: IntentRouterPort;
   readonly #rag: RagPort;
   readonly #runtime: RuntimePort;
   readonly #exa: ExaPort;
@@ -78,6 +117,7 @@ export class GatewayAgent {
   readonly #sessionQueues = new Map<string, Promise<void>>();
 
   constructor(options: GatewayAgentOptions) {
+    this.#router = options.router;
     this.#rag = options.rag;
     this.#runtime = options.runtime;
     this.#exa = options.exa;
@@ -104,7 +144,15 @@ export class GatewayAgent {
   }
 
   async #handleSerial(event: GatewayEvent): Promise<GatewayDecision> {
-    const initialHits = await this.#rag.search(event.text, { topK: 16 });
+    const intent = await this.#router.classify(event.text);
+    const isCasualChat =
+      intent.route === "chat_creative" && !intent.isFallback;
+    const usesAutomaticRag =
+      !intent.isFallback &&
+      ["local_knowledge", "technical_concept"].includes(intent.route);
+    const initialHits = usesAutomaticRag
+      ? await this.#rag.search(event.text, { topK: 16 })
+      : [];
     const evidence = initialHits.filter(
       (hit) => hit.score >= this.#evidenceThreshold,
     );
@@ -172,7 +220,9 @@ export class GatewayAgent {
         };
       },
     };
-    const evidenceBlock = evidence.length
+    const evidenceBlock = !usesAutomaticRag
+      ? ""
+      : evidence.length
       ? evidence
           .map(
             (hit, index) =>
@@ -207,11 +257,28 @@ export class GatewayAgent {
     const prompt = [boundedMemory, boundedEvidence, questionBlock]
       .filter(Boolean)
       .join("\n\n");
+    const tools = intent.isFallback
+      ? [ragTool, webTool]
+      : intent.route === "chat_creative" || intent.route === "local_runtime"
+        ? []
+        : intent.route === "external_fact"
+          ? [webTool]
+          : intent.route === "local_knowledge"
+            ? [ragTool]
+            : [ragTool, webTool];
     const result = await this.#runtime.run({
       sessionId: event.umo,
-      systemPrompt: SYSTEM_PROMPT,
+      systemPrompt: intent.isFallback
+        ? FALLBACK_SYSTEM_PROMPT
+        : isCasualChat
+          ? CHAT_SYSTEM_PROMPT
+          : intent.route === "external_fact"
+            ? EXTERNAL_SYSTEM_PROMPT
+            : intent.route === "local_runtime"
+              ? LOCAL_RUNTIME_SYSTEM_PROMPT
+              : SYSTEM_PROMPT,
       prompt,
-      tools: [ragTool, webTool],
+      tools,
     });
     const text = result.text
       .replace(/[（(]\s*(?:AI|ai)生成内容\s*[）)]/gu, "")

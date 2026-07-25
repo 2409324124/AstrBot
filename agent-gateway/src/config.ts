@@ -14,6 +14,9 @@ export type GatewayConfig = {
   llmBaseUrl: string;
   llmApiKey: string;
   llmModel: string;
+  routerModel: string;
+  routerTimeoutMs: number;
+  routerMaxOutputTokens: number;
   groupWhitelist: string[];
   contextWindow: number;
   maxOutputTokens: number;
@@ -77,6 +80,21 @@ export function loadConfig(env: NodeJS.ProcessEnv): GatewayConfig {
     llmBaseUrl: required(env, "LLM_BASE_URL"),
     llmApiKey: required(env, "LLM_API_KEY"),
     llmModel: required(env, "LLM_MODEL"),
+    routerModel: env.ROUTER_MODEL?.trim() || required(env, "LLM_MODEL"),
+    routerTimeoutMs: boundedNumber(
+      env,
+      "ROUTER_TIMEOUT_MS",
+      30000,
+      1000,
+      120000,
+    ),
+    routerMaxOutputTokens: boundedNumber(
+      env,
+      "ROUTER_MAX_OUTPUT_TOKENS",
+      512,
+      256,
+      2048,
+    ),
     groupWhitelist: groupWhitelist(env),
     contextWindow: boundedNumber(env, "CONTEXT_WINDOW", 16384, 4096, 1000000),
     maxOutputTokens: boundedNumber(

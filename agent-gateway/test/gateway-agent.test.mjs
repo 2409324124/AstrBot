@@ -3,10 +3,219 @@ import test from "node:test";
 
 import { GatewayAgent } from "../src/gateway-agent.ts";
 
+function fixedRouter(route = "local_knowledge") {
+  return {
+    classify: async () => ({ route, confidence: 0.99, isFallback: false })
+  };
+}
+
+test("Gateway agent answers casual dining chat without consulting local RAG", async () => {
+  const order = [];
+  let runInput;
+  const agent = new GatewayAgent({
+    router: {
+      classify: async (text) => {
+        order.push("route");
+        assert.equal(text, "我話今日中午食啲乜");
+        return { route: "chat_creative", confidence: 0.95, isFallback: false };
+      }
+    },
+    rag: {
+      search: async () => {
+        order.push("rag");
+        return [{
+          id: "irrelevant",
+          score: 0.5,
+          text: "Food101 benchmark from the CLIP paper",
+          source: "2021_clip.txt",
+          kbId: "papers"
+        }];
+      }
+    },
+    exa: { search: async () => [] },
+    runtime: {
+      run: async (input) => {
+        order.push("llm");
+        runInput = input;
+        return {
+          text: "食个焗猪扒饭啦。",
+          usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: {} }
+        };
+      }
+    },
+    evidenceThreshold: 0.03
+  });
+
+  const decision = await agent.handle({
+    schema_version: "1",
+    message_id: "group-chat-1",
+    umo: "qq_napcat:GroupMessage:763898834",
+    chat_type: "group",
+    group_id: "763898834",
+    sender_id: "member",
+    self_id: "bot-account",
+    text: "我話今日中午食啲乜",
+    mentions: [],
+    timestamp: 1784860800000,
+    is_admin: false,
+    owner_takeover_active: false
+  });
+
+  assert.deepEqual(order, ["route", "llm"]);
+  assert.doesNotMatch(runInput.prompt, /本地证据|2021_clip/);
+  assert.equal(runInput.tools.length, 0);
+  assert.equal(decision.messages[0].text, "食个焗猪扒饭啦。\n（ai生成内容）");
+});
+
+test("Gateway agent fallback keeps tools available without injecting automatic RAG", async () => {
+  let ragCalls = 0;
+  let runInput;
+  const agent = new GatewayAgent({
+    router: {
+      classify: async () => ({
+        route: "technical_concept",
+        confidence: 0,
+        isFallback: true
+      })
+    },
+    rag: {
+      search: async () => {
+        ragCalls += 1;
+        return [];
+      }
+    },
+    exa: { search: async () => [] },
+    runtime: {
+      run: async (input) => {
+        runInput = input;
+        return {
+          text: "我可以先澄清你的问题。",
+          usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: {} }
+        };
+      }
+    },
+    evidenceThreshold: 0.03
+  });
+
+  await agent.handle({
+    schema_version: "1",
+    message_id: "fallback-1",
+    umo: "private:fallback",
+    chat_type: "private",
+    sender_id: "member",
+    self_id: "bot-account",
+    text: "这个问题有点模糊",
+    mentions: [],
+    timestamp: 1784860800000,
+    is_admin: true,
+    owner_takeover_active: false
+  });
+
+  assert.equal(ragCalls, 0);
+  assert.doesNotMatch(runInput.prompt, /本地证据/);
+  assert.deepEqual(runInput.tools.map((tool) => tool.name), ["rag_search", "web_search"]);
+});
+
+test("Gateway agent routes current external facts to web search without local RAG", async () => {
+  let ragCalls = 0;
+  let runInput;
+  const agent = new GatewayAgent({
+    router: {
+      classify: async () => ({
+        route: "external_fact",
+        confidence: 0.98,
+        isFallback: false
+      })
+    },
+    rag: {
+      search: async () => {
+        ragCalls += 1;
+        return [];
+      }
+    },
+    exa: { search: async () => [] },
+    runtime: {
+      run: async (input) => {
+        runInput = input;
+        return {
+          text: "我会先检索最新来源。",
+          usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: {} }
+        };
+      }
+    },
+    evidenceThreshold: 0.03
+  });
+
+  await agent.handle({
+    schema_version: "1",
+    message_id: "external-1",
+    umo: "group:external",
+    chat_type: "group",
+    group_id: "763898834",
+    sender_id: "member",
+    self_id: "bot-account",
+    text: "今天发布了哪些AI模型？",
+    mentions: [],
+    timestamp: 1784860800000,
+    is_admin: false,
+    owner_takeover_active: false
+  });
+
+  assert.equal(ragCalls, 0);
+  assert.deepEqual(runInput.tools.map((tool) => tool.name), ["web_search"]);
+  assert.doesNotMatch(runInput.systemPrompt, /已经执行了本地知识检索/);
+  assert.match(runInput.systemPrompt, /网页搜索/);
+});
+
+test("Gateway agent does not present stored documents as live runtime state", async () => {
+  let ragCalls = 0;
+  let runInput;
+  const agent = new GatewayAgent({
+    router: fixedRouter("local_runtime"),
+    rag: {
+      search: async () => {
+        ragCalls += 1;
+        return [];
+      }
+    },
+    exa: { search: async () => [] },
+    runtime: {
+      run: async (input) => {
+        runInput = input;
+        return {
+          text: "我目前没有这项实时状态证据。",
+          usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: {} }
+        };
+      }
+    },
+    evidenceThreshold: 0.03
+  });
+
+  await agent.handle({
+    schema_version: "1",
+    message_id: "runtime-1",
+    umo: "private:runtime",
+    chat_type: "private",
+    sender_id: "admin",
+    self_id: "bot-account",
+    text: "当前Gateway是否正常？",
+    mentions: [],
+    timestamp: 1784860800000,
+    is_admin: true,
+    owner_takeover_active: false
+  });
+
+  assert.equal(ragCalls, 0);
+  assert.equal(runInput.tools.length, 0);
+  assert.doesNotMatch(runInput.systemPrompt, /已经执行了本地知识检索/);
+  assert.match(runInput.systemPrompt, /实时状态/);
+});
+
 test("Gateway agent retrieves evidence before calling the LLM", async () => {
   const order = [];
   let runInput;
   const agent = new GatewayAgent({
+    router: fixedRouter(),
     rag: {
       search: async (query, options) => {
         order.push("rag");
@@ -66,6 +275,13 @@ test("Gateway agent retrieves evidence before calling the LLM", async () => {
 test("Gateway agent exposes web search with x.com filtering", async () => {
   let searchOptions;
   const agent = new GatewayAgent({
+    router: {
+      classify: async () => ({
+        route: "external_fact",
+        confidence: 0.99,
+        isFallback: false
+      })
+    },
     rag: { search: async () => [] },
     exa: {
       search: async (_query, options) => {
@@ -119,6 +335,7 @@ test("RAG tool uses the accepted depth without overflowing tool context", async 
   let toolSearchOptions;
   let ragCalls = 0;
   const agent = new GatewayAgent({
+    router: fixedRouter(),
     rag: {
       search: async (_query, options) => {
         ragCalls += 1;
@@ -180,6 +397,7 @@ test("Gateway agent injects and records persistent conversation context", async 
     record: (...args) => recorded.push(args)
   };
   const agent = new GatewayAgent({
+    router: fixedRouter(),
     rag: { search: async () => [] },
     exa: { search: async () => [] },
     memory,
@@ -224,6 +442,7 @@ test("Gateway agent injects and records persistent conversation context", async 
 test("Gateway agent hard-bounds an oversized current message", async () => {
   let prompt = "";
   const agent = new GatewayAgent({
+    router: fixedRouter(),
     rag: { search: async () => [] },
     exa: { search: async () => [] },
     runtime: {
