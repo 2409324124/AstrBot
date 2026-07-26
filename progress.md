@@ -339,3 +339,15 @@
 - 新增 `gateway_reply` 总耗时审计，可把分类/RAG、工具和整轮模型延迟分开定位；仍只保存会话哈希和枚举字段。
 - 一次提交前秘密扫描命令因 shell 引号未闭合而未执行；改用无嵌套引号的差异扫描，只有测试占位 Bearer token，无真实密钥。
 - 首次 `git add` 因 worktree 元数据位于只读 `/srv/storage` 无法创建 `index.lock`，未暂存或提交；改用用户已授权的限定 Git 写权限继续。
+
+### 灰度部署与三轮 canary
+
+- 本地门禁通过：Gateway 8/8 测试文件、TypeScript strict typecheck、52 条 Python 精确回归、Ruff 与 diff-check 均成功。
+- 修复分三次逻辑提交推送到 feature 分支：私聊回环/引用上下文、引用技术追问路由、技术问题 RAG 隔离；远端工作树最终快进到 `e586ca4` 且 clean。
+- 部署前备份源码 bundle、AstrBot 配置、Gateway 环境文件与 SQLite；旧 Gateway 镜像保留回滚标签。
+- 仅停止 Gateway 完成 SQLite 一致性处理：管理员会话 24 个交换中删除 19 个空 user 回环，保留 5 个非空交换；其他会话、事件与知识库未删除。
+- 仅重载 AstrBot、灰度替换 Gateway；NapCat、Qdrant、Embedding 未重启且 restart count 均为 0。
+- 第一轮 canary 验证空事件为 400、引用回答相关，但审计 route 仍为 `chat_creative`，因此未判通过。
+- 第二轮 route 已为 `technical_concept`，但自动注入 16 条 RAG 证据并出现无关内容，因此再次未判通过。
+- 第三轮通过：空事件 400；引用事件 200/reply；route=`technical_concept`、automatic_rag_hits=0；模型按需调用 RAG 与 Web，最终无无关知识库内容。
+- Gateway `/healthz`、`/readyz` 均正常；AstrBot 插件重新加载且启动日志无错误。最终仍等待用户侧真实 QQ 私聊与群引用烟测。
