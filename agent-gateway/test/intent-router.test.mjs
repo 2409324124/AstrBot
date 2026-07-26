@@ -90,4 +90,8 @@ test("Intent router receives quoted and recent context for elliptical questions"
   assert.match(runInput.prompt, /直接接 Pi 这个轮子/);
   assert.match(runInput.prompt, /<untrusted_recent_context>/);
   assert.match(runInput.prompt, /<untrusted_user_message>\n会好用吗/);
+  assert.match(
+    runInput.systemPrompt,
+    /technical tool.*会好用吗.*technical_concept/is,
+  );
 });
