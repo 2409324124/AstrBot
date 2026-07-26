@@ -229,3 +229,6 @@
 - 修复必须在 Gateway 公共接口完成，并与相同 UMO 的在途 Agent 请求串行，避免 reset 后旧请求完成又把历史写回来。
 - 用户选择的权限边界是：白名单群成员均可控制本群会话；白名单外群拒绝；私聊只有 AstrBot 管理员可控制。
 - 生产未安装定时任务插件，`cron_jobs` 表为零条，但 AstrBot 配置仍有 `provider_settings.proactive_capability.add_cron_tools=true`，需要显式关闭。
+- 生产部署后 `add_cron_tools=False` 且 `cron_jobs=0`；Gateway 不暴露 cron/reminder 工具，系统提示也明确禁止声称已创建定时任务。
+- 生产控制 API 的实际权限边界符合契约：Gateway 白名单群可读取本群 stats，非管理员私聊在进入控制器前返回 403；两条探针均未进入路由、RAG、Web 或 LLM。
+- 本阶段只重建 AstrBot 与 Gateway。NapCat、BGE-M3 Embedding、Qdrant 保持原启动时间，避免 QQ 登录和现有向量库受到影响。

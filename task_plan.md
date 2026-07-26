@@ -153,7 +153,7 @@
 - [x] RED→GREEN：`/help`、`/provider`、显式研究、放行内置命令、禁用命令和未知斜杠命令按安全最小集截流
 - [x] RED→GREEN：持久化 Gateway token 统计；`/new` 清统计、`/reset` 保留统计
 - [x] 提供可逆的 AstrBot 定时任务工具禁用脚本；生产已有任务已确认是零
-- [ ] 完整门禁、备份、提交推送与仅 AstrBot/Gateway 灰度部署
+- [x] 完整门禁、备份、提交推送与仅 AstrBot/Gateway 灰度部署
 - [ ] 真实 QQ 验证清空后下一轮不携带旧记忆
 - **状态：** in_progress
 
@@ -226,6 +226,10 @@
 | 本轮首次读取系统化诊断技能少一层 `ok-skills/` | 1 | 未修改项目；改用技能目录映射中的实际路径并完整读取。 |
 | 首次读取 WakingCheck 使用了旧猜测路径 | 1 | `sed` 只读失败、未改文件；按 `rg` 结果改读 `astrbot/core/pipeline/waking_check/stage.py`。 |
 | 首次秘密扫描 shell 模式引号冲突 | 1 | 命令在解析阶段停止、未扫描或修改；改为对新增 diff 使用不含嵌套引号的模式，结果无命中。 |
+| 生产 `backup.sh` 使用的 Compose 视图不含 AstrBot | 1 | 未停止服务；直接在运行中的 AstrBot 容器调用同一个 `backup_state.py`，Qdrant/SQLite 快照成功。 |
+| 首次生产配置探针猜测了多余的 `config/` 目录 | 1 | 只读失败、未修改；按容器实际目录改读 `/AstrBot/data/cmd_config.json`。 |
+| Gateway 常规构建获取 Docker Hub Node 元数据超时 | 1 | package 与 lockfile 未变；从已验证旧镜像仅覆盖 `src/`，以 `--network=none` 完成可审计的增量镜像。 |
+| 首次重建 AstrBot 未传 RAG env 文件 | 1 | Compose 在插值阶段停止，旧容器未变；增加 `--env-file rag-stack/.env` 后只重建 AstrBot。 |
 
 ## 备注
 

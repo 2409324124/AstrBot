@@ -368,3 +368,9 @@
 - RED→GREEN：显式 research 跳过意图分类并在主模型前实际执行 Exa；网页证据有界注入。
 - RED→GREEN：新增可逆 `configure_agent_safety`，只关闭 `add_cron_tools` 并保存最小恢复状态；Gateway 本身不暴露定时任务工具。
 - 本地完整门禁：Node 8 个测试文件、TypeScript strict、Python 70 项相关回归、Ruff、compileall、Compose config、diff-check 与新增 diff 秘密扫描均通过。
+- 功能提交 `0f6b6b3` 已推送到 `fork/feature/local-rag-qdrant`，远端部署分支快进到同一提交且工作树干净。
+- 生产部署前创建 RAG 快照 `/mnt/PM983/astrbot-rag/snapshots/astrbot-rag-20260726T192451Z`；源码、AstrBot 配置和一致性 Gateway SQLite 备份位于 `/home/miku/astrbot-deploy/backups/session-controls-20260726T192508Z`。
+- 仅重建 Gateway 与 AstrBot；NapCat、Qdrant、Embedding 的启动时间保持不变。五个容器均 running、restart_count=0，Gateway health/ready 均通过，AstrBot 插件正常加载。
+- 生产鉴权烟测不调用模型：白名单群 `stats` 返回 200，非管理员私聊返回 403；`session_usage` 持久表存在。AstrBot 容器插件回归 19/19 通过。
+- 已应用可逆安全配置：`add_cron_tools=False`、`cron_jobs=0`，恢复状态保存在 `rag-stack/runtime/agent-safety-backup.json`。
+- 常规 Gateway 构建只在拉取 Docker Hub Node 元数据时超时；因依赖锁未变化，改从已验证镜像离线覆盖本次 `src/` 并成功部署。首次 AstrBot Compose 命令缺少 env 文件而在插值阶段停止，补充 `--env-file rag-stack/.env` 后成功。
