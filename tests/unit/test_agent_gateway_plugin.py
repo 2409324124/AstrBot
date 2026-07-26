@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
+from astrbot.api.message_components import Reply
 from astrbot_plugin_agent_gateway.main import Main
 
 
@@ -25,6 +26,7 @@ class FakeEvent:
         self.message_str = "你是谁"
         self.sent = []
         self.stopped = False
+        self.messages = []
 
     def get_sender_id(self):
         return "1907483592"
@@ -36,7 +38,7 @@ class FakeEvent:
         return None
 
     def get_messages(self):
-        return []
+        return self.messages
 
     def get_message_type(self):
         from astrbot.api.platform import MessageType
@@ -78,6 +80,59 @@ async def test_admin_private_message_is_replied_by_gateway_and_stops_old_agent(
 
     assert event.sent == ["我是东云bot（ai生成内容）"]
     assert event.stopped is True
+
+
+@pytest.mark.asyncio
+async def test_blank_admin_private_message_is_stopped_before_gateway(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("AGENT_GATEWAY_ENABLED", "true")
+    plugin = Main(SimpleNamespace(astrbot_config_mgr=object()))
+    calls = 0
+
+    async def handle(_payload):
+        nonlocal calls
+        calls += 1
+        return {"action": "reply", "messages": []}
+
+    plugin.client = SimpleNamespace(handle=handle, close=lambda: None)
+    event = FakeEvent()
+    event.message_str = "   "
+
+    await plugin.route_to_gateway(event)
+
+    assert calls == 0
+    assert event.sent == []
+    assert event.stopped is True
+
+
+@pytest.mark.asyncio
+async def test_quoted_message_context_is_forwarded_to_gateway(monkeypatch) -> None:
+    monkeypatch.setenv("AGENT_GATEWAY_ENABLED", "true")
+    plugin = Main(SimpleNamespace(astrbot_config_mgr=object()))
+    payloads = []
+
+    async def handle(payload):
+        payloads.append(payload)
+        return {"action": "no_reply", "messages": []}
+
+    plugin.client = SimpleNamespace(handle=handle, close=lambda: None)
+    event = FakeEvent()
+    event.message_str = "会好用吗"
+    event.messages = [
+        Reply(
+            id="quoted-1",
+            sender_id="owner",
+            message_str="直接接 Pi 这个轮子",
+        )
+    ]
+
+    await plugin.route_to_gateway(event)
+
+    assert payloads[0]["reply_context"] == {
+        "sender_id": "owner",
+        "text": "直接接 Pi 这个轮子",
+    }
 
 
 @pytest.mark.asyncio

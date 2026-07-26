@@ -43,10 +43,30 @@ export type GatewayEvent = {
   text: string;
   mentions: string[];
   reply_to_sender_id?: string;
+  reply_context?: {
+    sender_id: string;
+    text: string;
+  };
   timestamp: number;
   is_admin: boolean;
   owner_takeover_active: boolean;
 };
+
+function isReplyContext(
+  value: unknown,
+): value is NonNullable<GatewayEvent["reply_context"]> {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const context = value as { sender_id?: unknown; text?: unknown };
+  return (
+    typeof context.sender_id === "string" &&
+    context.sender_id.length <= 128 &&
+    typeof context.text === "string" &&
+    context.text.trim().length > 0 &&
+    [...context.text].length <= 2000
+  );
+}
 
 type AppOptions = {
   eventToken: string;
@@ -84,8 +104,10 @@ function isGatewayEvent(value: unknown): value is GatewayEvent {
     typeof event.sender_id === "string" &&
     typeof event.self_id === "string" &&
     typeof event.text === "string" &&
+    event.text.trim().length > 0 &&
     Array.isArray(event.mentions) &&
     event.mentions.every((mention) => typeof mention === "string") &&
+    (event.reply_context === undefined || isReplyContext(event.reply_context)) &&
     typeof event.timestamp === "number" &&
     Number.isFinite(event.timestamp) &&
     typeof event.is_admin === "boolean" &&

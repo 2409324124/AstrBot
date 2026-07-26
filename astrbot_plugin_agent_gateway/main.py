@@ -50,6 +50,10 @@ class Main(star.Star):
         normalized = event.message_str.strip()
 
         message_type = event.get_message_type()
+        if message_type == MessageType.FRIEND_MESSAGE and not normalized:
+            event.should_call_llm(False)
+            event.stop_event()
+            return
         if self._is_admin_command(normalized):
             if message_type != MessageType.FRIEND_MESSAGE or not event.is_admin():
                 event.should_call_llm(False)
@@ -99,13 +103,21 @@ class Main(star.Star):
             for component in event.get_messages()
             if isinstance(component, At)
         ]
-        reply_sender = next(
+        reply_component = next(
             (
-                str(component.sender_id)
+                component
                 for component in event.get_messages()
                 if isinstance(component, Reply)
             ),
             None,
+        )
+        reply_sender = (
+            str(reply_component.sender_id) if reply_component is not None else None
+        )
+        reply_text = (
+            str(reply_component.message_str or "").strip()
+            if reply_component is not None
+            else ""
         )
         message_obj = getattr(event, "message_obj", None)
         timestamp = getattr(message_obj, "timestamp", None)
@@ -131,6 +143,11 @@ class Main(star.Star):
             payload["group_id"] = str(event.get_group_id())
         if reply_sender:
             payload["reply_to_sender_id"] = reply_sender
+        if reply_component is not None and reply_text:
+            payload["reply_context"] = {
+                "sender_id": reply_sender or "",
+                "text": reply_text[:2000],
+            }
 
         try:
             decision = await self.client.handle(payload)

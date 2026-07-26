@@ -213,3 +213,51 @@ test("event API rejects malformed payloads before calling the agent", async () =
   assert.equal(calls, 0);
   await app.close();
 });
+
+test("event API rejects blank text before calling the agent", async () => {
+  let calls = 0;
+  const app = createApp({
+    eventToken: "event-secret",
+    handleEvent: async () => {
+      calls += 1;
+      return { action: "reply", messages: [], reason_code: "called" };
+    }
+  });
+
+  const response = await app.inject({
+    method: "POST",
+    url: "/v1/events",
+    headers: { authorization: "Bearer event-secret" },
+    payload: { ...event, message_id: "blank-private", text: "  \n " }
+  });
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(calls, 0);
+  await app.close();
+});
+
+test("event API rejects oversized quoted context before calling the agent", async () => {
+  let calls = 0;
+  const app = createApp({
+    eventToken: "event-secret",
+    handleEvent: async () => {
+      calls += 1;
+      return { action: "reply", messages: [], reason_code: "called" };
+    }
+  });
+
+  const response = await app.inject({
+    method: "POST",
+    url: "/v1/events",
+    headers: { authorization: "Bearer event-secret" },
+    payload: {
+      ...event,
+      message_id: "oversized-quote",
+      reply_context: { sender_id: "owner", text: "x".repeat(2001) }
+    }
+  });
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(calls, 0);
+  await app.close();
+});

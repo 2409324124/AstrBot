@@ -130,6 +130,9 @@ class AiocqhttpAdapter(Platform):
         logger.debug(f"[aiocqhttp] RawMessage {event}")
 
         if event["post_type"] == "message":
+            tracker = get_outbound_message_tracker(self.bot)
+            if tracker.consume_sent_message_id(event):
+                return None
             is_self_group_message = event.get("message_type") == "group" and str(
                 event.get("user_id", "")
             ) == str(event.get("self_id", ""))

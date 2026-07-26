@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
 
@@ -26,6 +28,25 @@ type MemoryPort = {
   record: (sessionId: string, user: string, assistant: string) => void;
 };
 
+export type GatewayAuditEntry = {
+  event: "gateway_route" | "gateway_tool" | "gateway_reply";
+  session_ref: string;
+  route?: IntentRoute;
+  confidence?: number;
+  fallback?: boolean;
+  has_reply_context?: boolean;
+  automatic_rag_hits?: number;
+  tool?: "rag_search" | "web_search";
+  result_count?: number;
+  action?: "reply" | "no_reply";
+  reason_code?: string;
+  duration_ms: number;
+};
+
+type AuditPort = {
+  record: (entry: GatewayAuditEntry) => void;
+};
+
 export type IntentRoute =
   | "local_runtime"
   | "local_knowledge"
@@ -39,8 +60,17 @@ export type IntentDecision = {
   isFallback: boolean;
 };
 
+export type IntentRoutingInput = {
+  text: string;
+  replyContext?: {
+    senderId: string;
+    text: string;
+  };
+  recentContext?: string;
+};
+
 type IntentRouterPort = {
-  classify: (text: string) => Promise<IntentDecision>;
+  classify: (input: IntentRoutingInput) => Promise<IntentDecision>;
 };
 
 type GatewayAgentOptions = {
@@ -50,6 +80,7 @@ type GatewayAgentOptions = {
   exa: ExaPort;
   evidenceThreshold: number;
   memory?: MemoryPort;
+  audit?: AuditPort;
   maxPromptTokens?: number;
 };
 
@@ -62,6 +93,12 @@ const SYSTEM_PROMPT = `你是东云bot。回答前已经执行了本地知识检
 const CHAT_SYSTEM_PROMPT = `你是东云bot。自然回应普通聊天、个人意见与开放式社交互动。
 不要把闲聊当作知识库问答，也不要声称查询过本地知识库。
 普通闲聊尽量不超过20个中文字符。
+不要自行添加 AI 内容标记，网关会统一添加。`;
+
+const TECHNICAL_SYSTEM_PROMPT = `你是东云bot。回答技术解释、方案比较和可行性问题。
+引用消息用于解析当前问题的指代；逐项覆盖用户明确提出的问题，不得悄悄缩小范围。
+本地证据只是补充材料。证据不足时可基于稳定技术知识分析，或在需要现行资料时调用网页搜索。
+不要仅以“本地知识库没有资料”作为答案，也不要用无关知识库条目代替对当前技术问题的分析。
 不要自行添加 AI 内容标记，网关会统一添加。`;
 
 const FALLBACK_SYSTEM_PROMPT = `你是东云bot。意图路由暂时无法给出可信结论。
@@ -113,6 +150,7 @@ export class GatewayAgent {
   readonly #exa: ExaPort;
   readonly #evidenceThreshold: number;
   readonly #memory: MemoryPort | undefined;
+  readonly #audit: AuditPort | undefined;
   readonly #maxPromptTokens: number;
   readonly #sessionQueues = new Map<string, Promise<void>>();
 
@@ -123,6 +161,7 @@ export class GatewayAgent {
     this.#exa = options.exa;
     this.#evidenceThreshold = options.evidenceThreshold;
     this.#memory = options.memory;
+    this.#audit = options.audit;
     this.#maxPromptTokens = options.maxPromptTokens ?? 12288;
   }
 
@@ -144,18 +183,59 @@ export class GatewayAgent {
   }
 
   async #handleSerial(event: GatewayEvent): Promise<GatewayDecision> {
-    const intent = await this.#router.classify(event.text);
+    const startedAt = Date.now();
+    const sessionRef = createHash("sha256")
+      .update(event.umo)
+      .digest("hex")
+      .slice(0, 12);
+    const recordReplyAudit = (
+      action: "reply" | "no_reply",
+      reasonCode: string,
+    ): void => {
+      this.#audit?.record({
+        event: "gateway_reply",
+        session_ref: sessionRef,
+        action,
+        reason_code: reasonCode,
+        duration_ms: Date.now() - startedAt,
+      });
+    };
+    const memory = this.#memory?.context(event.umo) ?? "";
+    const replyContext = event.reply_context
+      ? {
+          senderId: event.reply_context.sender_id,
+          text: event.reply_context.text,
+        }
+      : undefined;
+    const intent = await this.#router.classify({
+      text: event.text,
+      ...(replyContext ? { replyContext } : {}),
+      ...(memory ? { recentContext: tail(memory, 1200) } : {}),
+    });
     const isCasualChat =
       intent.route === "chat_creative" && !intent.isFallback;
     const usesAutomaticRag =
       !intent.isFallback &&
       ["local_knowledge", "technical_concept"].includes(intent.route);
+    const retrievalQuery = replyContext
+      ? `${replyContext.text}\n${event.text}`
+      : event.text;
     const initialHits = usesAutomaticRag
-      ? await this.#rag.search(event.text, { topK: 16 })
+      ? await this.#rag.search(retrievalQuery, { topK: 16 })
       : [];
     const evidence = initialHits.filter(
       (hit) => hit.score >= this.#evidenceThreshold,
     );
+    this.#audit?.record({
+      event: "gateway_route",
+      session_ref: sessionRef,
+      route: intent.route,
+      confidence: intent.confidence,
+      fallback: intent.isFallback,
+      has_reply_context: Boolean(replyContext),
+      automatic_rag_hits: evidence.length,
+      duration_ms: Date.now() - startedAt,
+    });
     const ragParameters = Type.Object({
       query: Type.String({ minLength: 1 }),
       top_k: Type.Optional(Type.Integer({ minimum: 1, maximum: 24 })),
@@ -166,8 +246,16 @@ export class GatewayAgent {
       description: "Search the local persistent knowledge base",
       parameters: ragParameters,
       execute: async (_toolCallId, params) => {
+        const toolStartedAt = Date.now();
         const hits = await this.#rag.search(params.query, {
           topK: params.top_k ?? 16,
+        });
+        this.#audit?.record({
+          event: "gateway_tool",
+          session_ref: sessionRef,
+          tool: "rag_search",
+          result_count: hits.length,
+          duration_ms: Date.now() - toolStartedAt,
         });
         const toolEvidence = hits
           .map(
@@ -200,9 +288,17 @@ export class GatewayAgent {
         "Search current web information. Use domains=['x.com'] for X/Twitter.",
       parameters: webParameters,
       execute: async (_toolCallId, params) => {
+        const toolStartedAt = Date.now();
         const results = await this.#exa.search(params.query, {
           ...(params.domains ? { domains: params.domains } : {}),
           maxResults: params.max_results ?? 5,
+        });
+        this.#audit?.record({
+          event: "gateway_tool",
+          session_ref: sessionRef,
+          tool: "web_search",
+          result_count: results.length,
+          duration_ms: Date.now() - toolStartedAt,
         });
         return {
           content: [
@@ -230,16 +326,25 @@ export class GatewayAgent {
           )
           .join("\n\n")
       : "[本地证据] 未检索到达到阈值的内容。";
-    const memory = this.#memory?.context(event.umo) ?? "";
-    const questionLabel = "[用户问题]\n";
-    const questionBudget = Math.max(
-      length(questionLabel),
-      Math.floor(this.#maxPromptTokens * 0.6),
-    );
-    const questionBlock = `${questionLabel}${clipMiddle(
+    const questionBudget = Math.max(1, Math.floor(this.#maxPromptTokens * 0.6));
+    const userLabel = "[用户问题]\n";
+    const userBudget = replyContext
+      ? Math.max(length(userLabel) + 16, Math.floor(questionBudget * 0.45))
+      : questionBudget;
+    const userBlock = `${userLabel}${clipMiddle(
       event.text,
-      questionBudget - length(questionLabel),
+      Math.max(0, userBudget - length(userLabel)),
     )}`;
+    const replyLabel = "[引用消息]\n";
+    const replyBudget = Math.max(0, questionBudget - length(userBlock) - 2);
+    const replyBlock =
+      replyContext && replyBudget > length(replyLabel)
+        ? `${replyLabel}${clipMiddle(
+            replyContext.text,
+            replyBudget - length(replyLabel),
+          )}`
+        : "";
+    const questionBlock = [replyBlock, userBlock].filter(Boolean).join("\n\n");
     let remaining = this.#maxPromptTokens - length(questionBlock);
     const memoryCandidate = memory ? `[对话记忆]\n${memory}` : "";
     const memoryLimit = Math.min(
@@ -276,7 +381,9 @@ export class GatewayAgent {
             ? EXTERNAL_SYSTEM_PROMPT
             : intent.route === "local_runtime"
               ? LOCAL_RUNTIME_SYSTEM_PROMPT
-              : SYSTEM_PROMPT,
+              : intent.route === "technical_concept"
+                ? TECHNICAL_SYSTEM_PROMPT
+                : SYSTEM_PROMPT,
       prompt,
       tools,
     });
@@ -284,6 +391,7 @@ export class GatewayAgent {
       .replace(/[（(]\s*(?:AI|ai)生成内容\s*[）)]/gu, "")
       .trim();
     if (!text) {
+      recordReplyAudit("no_reply", "empty_agent_reply");
       return { action: "no_reply", messages: [], reason_code: "empty_agent_reply" };
     }
     this.#memory?.record(event.umo, event.text, text);
@@ -298,6 +406,7 @@ export class GatewayAgent {
       sources.length > 0 && !text.includes("本地来源：")
         ? `${text}\n本地来源：${sources.join("、")}`
         : text;
+    recordReplyAudit("reply", "agent_reply");
     return {
       action: "reply",
       messages: [{ type: "text", text: `${citedText}\n（ai生成内容）` }],

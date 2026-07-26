@@ -95,6 +95,9 @@ export function buildApp(env: NodeJS.ProcessEnv) {
   });
   const gatewayAgent = new GatewayAgent({
     router: new RuntimeIntentRouter({ runtime: routerRuntime }),
+    audit: {
+      record: (entry) => console.info(JSON.stringify(entry)),
+    },
     rag,
     runtime,
     exa: new ExaSearchClient({ apiKey: config.exaApiKey }),

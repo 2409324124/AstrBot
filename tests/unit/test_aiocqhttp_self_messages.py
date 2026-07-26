@@ -59,6 +59,26 @@ def make_self_group_message_event(message_id: int, text: str) -> Event:
     )
 
 
+def make_private_message_event(message_id: int, text: str) -> Event:
+    return Event(
+        {
+            "time": 1,
+            "post_type": "message",
+            "message_type": "private",
+            "sub_type": "friend",
+            "self_id": 3250641287,
+            "user_id": 1907483592,
+            "message_id": message_id,
+            "message": [{"type": "text", "data": {"text": text}}],
+            "raw_message": text,
+            "sender": {
+                "user_id": 1907483592,
+                "nickname": "admin",
+            },
+        }
+    )
+
+
 @pytest.mark.asyncio
 async def test_untracked_normal_self_group_message_is_tagged_as_human_takeover():
     adapter = AiocqhttpAdapter.__new__(AiocqhttpAdapter)
@@ -83,6 +103,32 @@ async def test_tracked_group_message_sent_is_not_forwarded_as_human_takeover():
     )
 
     assert message is None
+
+
+@pytest.mark.asyncio
+async def test_tracked_private_message_sent_is_not_forwarded_as_admin_input():
+    adapter = AiocqhttpAdapter.__new__(AiocqhttpAdapter)
+    adapter.bot = MagicMock()
+    get_outbound_message_tracker(adapter.bot).remember_sent_message_id(99)
+
+    message = await adapter.convert_message(make_private_message_event(99, ""))
+
+    assert message is None
+
+
+@pytest.mark.asyncio
+async def test_private_user_repeating_bot_text_is_not_filtered_by_fingerprint():
+    adapter = AiocqhttpAdapter.__new__(AiocqhttpAdapter)
+    adapter.bot = MagicMock()
+    tracker = get_outbound_message_tracker(adapter.bot)
+    tracker.remember_pending([{"type": "text", "data": {"text": "same text"}}])
+
+    message = await adapter.convert_message(
+        make_private_message_event(100, "same text")
+    )
+
+    assert message is not None
+    assert message.message_str == "same text"
 
 
 def test_consuming_bot_message_clears_id_and_matching_pending_fingerprint():

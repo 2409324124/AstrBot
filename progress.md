@@ -314,3 +314,28 @@
 - 正式 Gateway 已切换到 `3db6502` 镜像；正式餐饮/CPU E2E 分别约 2.09 秒和 2.52 秒，所有断言通过。
 - 仅 Gateway 被重建；AstrBot、NapCat、Qdrant、Embedding 启动时间保持不变，五个容器均 running/restart_count=0，Gateway 近十分钟错误计数为 0。
 - 管理 SQLite 仍为 `deepseek-v4-pro` 与 5 个群白名单；远端源码 HEAD `3db6502`、工作树 clean。
+
+## 2026-07-26：管理员私聊循环与引用语境修复
+
+- **状态：** in_progress
+- 用户批准按既定方案修复、提交推送并灰度部署。
+- 只读生产证据确认管理员私聊存在出站空消息回流；最近一轮出现分钟级连续回复和被空 user 污染的会话状态。
+- 只读代码确认插件未拒绝空私聊，Gateway 事件校验允许空文本，aiocqhttp 出站追踪仅在自身群消息转换路径消费。
+- 只读群时间线确认目标短问句携带有效 Reply 正文，但插件只传引用发送者 ID；路由器也明确不接收历史或引用上下文。
+- 实施前基线：插件目标测试 4/4、Gateway 8/8、TypeScript strict typecheck 通过；本地与远端均位于 `c4b574d` 且工作树 clean。
+- RED→GREEN：插件现于任何管理命令/Gateway 调用前终止空白好友消息；目标测试确认客户端调用为 0。
+- RED→GREEN：Gateway 事件校验要求 `text.trim()` 非空；空事件返回 400，路由/RAG/LLM 调用为 0。
+- Node `--test` 的子进程汇总未显示断言详情，改为直接运行目标测试文件取得 `200 != 400` 的 RED 证据；未重复无信息命令。
+- RED→GREEN：aiocqhttp 对所有消息先消费精确出站 message_id；私聊不会使用 pending 文本指纹，用户复述同文本仍正常进入。
+- RED→GREEN：插件从 Reply 组件提取正文并限制为 2000 字符；Gateway 对结构化 `reply_context` 做运行时校验，超限事件在 Agent 前返回 400。
+- RED→GREEN：Gateway 在分类前读取近期记忆尾部 1200 字符；引用正文优先，随后是近期记忆和当前消息，全部放在独立不可信标签中。
+- RED→GREEN：引用正文同时进入自动 RAG 查询与最终问题块；技术路由明确禁止用“知识库没有资料”代替分析。
+- RED→GREEN：生产将输出无正文的 `gateway_route` / `gateway_tool` JSON 审计，包含会话哈希、路由、置信度、引用标志、命中数和耗时。
+- 一次 Node 目标测试仍在仓库根运行导致找不到 `test/gateway-agent.test.mjs`；未执行代码，立即固定到 `agent-gateway/` 后通过。
+- 首轮联合门禁的 23 个 Python 测试、8 个 Node 测试文件和 typecheck 均通过；Ruff 仅报告新增测试 import 分组，按提示做最小空行修正后重新严格执行。
+- 第二次 Ruff 显示两个项目内 `astrbot*` import 应属于同一分组；移除两者间空行，不再猜测分组规则。
+- diff 审计发现小窗口下长引用可能突破主提示硬预算；新增失败测试后改为“当前问题优先、引用使用剩余预算”，100 字符预算回归通过。
+- 最终扩大门禁：Python 52/52、Ruff、`git diff --check`、Gateway 8/8 测试文件与 TypeScript strict typecheck 全部通过；群人工接管测试包含在内。
+- 新增 `gateway_reply` 总耗时审计，可把分类/RAG、工具和整轮模型延迟分开定位；仍只保存会话哈希和枚举字段。
+- 一次提交前秘密扫描命令因 shell 引号未闭合而未执行；改用无嵌套引号的差异扫描，只有测试占位 Bearer token，无真实密钥。
+- 首次 `git add` 因 worktree 元数据位于只读 `/srv/storage` 无法创建 `index.lock`，未暂存或提交；改用用户已授权的限定 Git 写权限继续。

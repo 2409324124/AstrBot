@@ -97,10 +97,7 @@ class OutboundMessageTracker:
 
     def consume_if_bot_message(self, event: dict) -> bool:
         self._prune()
-        message_id = event.get("message_id")
-        matched_message_id = bool(
-            message_id is not None and self._message_ids.pop(str(message_id), None)
-        )
+        matched_message_id = self.consume_sent_message_id(event)
 
         fingerprint = _message_fingerprint(event.get("message", []))
         matched_fingerprint = False
@@ -110,6 +107,21 @@ class OutboundMessageTracker:
                 matched_fingerprint = True
                 break
         return matched_message_id or matched_fingerprint
+
+    def consume_sent_message_id(self, event: dict) -> bool:
+        """Consume an exact outbound message ID without fuzzy text matching."""
+        self._prune()
+        message_id = event.get("message_id")
+        matched_message_id = bool(
+            message_id is not None and self._message_ids.pop(str(message_id), None)
+        )
+        if matched_message_id:
+            fingerprint = _message_fingerprint(event.get("message", []))
+            for index, (pending, _) in enumerate(self._pending_fingerprints):
+                if pending == fingerprint:
+                    del self._pending_fingerprints[index]
+                    break
+        return matched_message_id
 
     def _prune(self) -> None:
         now = time.monotonic()

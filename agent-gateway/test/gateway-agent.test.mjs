@@ -14,9 +14,9 @@ test("Gateway agent answers casual dining chat without consulting local RAG", as
   let runInput;
   const agent = new GatewayAgent({
     router: {
-      classify: async (text) => {
+      classify: async (input) => {
         order.push("route");
-        assert.equal(text, "我話今日中午食啲乜");
+        assert.deepEqual(input, { text: "我話今日中午食啲乜" });
         return { route: "chat_creative", confidence: 0.95, isFallback: false };
       }
     },
@@ -65,6 +65,126 @@ test("Gateway agent answers casual dining chat without consulting local RAG", as
   assert.doesNotMatch(runInput.prompt, /本地证据|2021_clip/);
   assert.equal(runInput.tools.length, 0);
   assert.equal(decision.messages[0].text, "食个焗猪扒饭啦。\n（ai生成内容）");
+});
+
+test("Gateway agent resolves an elliptical question from quoted context", async () => {
+  let routerInput;
+  let ragQuery;
+  let runInput;
+  const agent = new GatewayAgent({
+    router: {
+      classify: async (input) => {
+        routerInput = input;
+        return { route: "technical_concept", confidence: 0.97, isFallback: false };
+      }
+    },
+    rag: {
+      search: async (query) => {
+        ragQuery = query;
+        return [];
+      }
+    },
+    exa: { search: async () => [] },
+    runtime: {
+      run: async (input) => {
+        runInput = input;
+        return {
+          text: "Pi 作为 Agent Gateway 编排层可行。",
+          usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: {} }
+        };
+      }
+    },
+    memory: {
+      context: () => "用户：准备把 AstrBot 接到独立 Gateway",
+      record: () => undefined
+    },
+    evidenceThreshold: 0.03
+  });
+
+  const decision = await agent.handle({
+    schema_version: "1",
+    message_id: "quoted-follow-up-1",
+    umo: "qq_napcat:GroupMessage:902811542",
+    chat_type: "group",
+    group_id: "902811542",
+    sender_id: "member",
+    self_id: "bot-account",
+    text: "会好用吗",
+    mentions: [],
+    reply_context: {
+      sender_id: "owner",
+      text: "直接接 Pi 这个轮子"
+    },
+    timestamp: 1784860800000,
+    is_admin: false,
+    owner_takeover_active: false
+  });
+
+  assert.deepEqual(routerInput, {
+    text: "会好用吗",
+    replyContext: { senderId: "owner", text: "直接接 Pi 这个轮子" },
+    recentContext: "用户：准备把 AstrBot 接到独立 Gateway"
+  });
+  assert.match(ragQuery, /直接接 Pi 这个轮子/);
+  assert.match(ragQuery, /会好用吗/);
+  assert.match(runInput.prompt, /\[引用消息\]\n直接接 Pi 这个轮子/);
+  assert.match(runInput.prompt, /\[用户问题\]\n会好用吗/);
+  assert.match(runInput.systemPrompt, /不要仅以.*知识库.*没有/);
+  assert.equal(decision.action, "reply");
+});
+
+test("Gateway agent emits a content-free route audit", async () => {
+  const audits = [];
+  const agent = new GatewayAgent({
+    router: {
+      classify: async () => ({
+        route: "chat_creative",
+        confidence: 0.91,
+        isFallback: false
+      })
+    },
+    rag: { search: async () => [] },
+    exa: { search: async () => [] },
+    runtime: {
+      run: async () => ({
+        text: "可以。",
+        usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: {} }
+      })
+    },
+    audit: { record: (entry) => audits.push(entry) },
+    evidenceThreshold: 0.03
+  });
+
+  await agent.handle({
+    schema_version: "1",
+    message_id: "audit-1",
+    umo: "qq_napcat:GroupMessage:902811542",
+    chat_type: "group",
+    group_id: "902811542",
+    sender_id: "member",
+    self_id: "bot-account",
+    text: "secret message body",
+    mentions: [],
+    timestamp: 1784860800000,
+    is_admin: false,
+    owner_takeover_active: false
+  });
+
+  assert.equal(audits.length, 2);
+  assert.equal(audits[0].event, "gateway_route");
+  assert.equal(audits[0].route, "chat_creative");
+  assert.equal(audits[0].confidence, 0.91);
+  assert.equal(audits[0].automatic_rag_hits, 0);
+  assert.match(audits[0].session_ref, /^[0-9a-f]{12}$/);
+  assert.deepEqual(
+    {
+      event: audits[1].event,
+      action: audits[1].action,
+      reason_code: audits[1].reason_code
+    },
+    { event: "gateway_reply", action: "reply", reason_code: "agent_reply" }
+  );
+  assert.doesNotMatch(JSON.stringify(audits), /secret message body|902811542/);
 });
 
 test("Gateway agent fallback keeps tools available without injecting automatic RAG", async () => {
@@ -274,6 +394,7 @@ test("Gateway agent retrieves evidence before calling the LLM", async () => {
 
 test("Gateway agent exposes web search with x.com filtering", async () => {
   let searchOptions;
+  const audits = [];
   const agent = new GatewayAgent({
     router: {
       classify: async () => ({
@@ -310,6 +431,7 @@ test("Gateway agent exposes web search with x.com filtering", async () => {
         };
       }
     },
+    audit: { record: (entry) => audits.push(entry) },
     evidenceThreshold: 0.2
   });
 
@@ -328,12 +450,25 @@ test("Gateway agent exposes web search with x.com filtering", async () => {
   });
 
   assert.deepEqual(searchOptions, { domains: ["x.com"], maxResults: 5 });
+  assert.equal(audits.filter((entry) => entry.event === "gateway_tool").length, 1);
+  const webAudit = audits.find(
+    (entry) => entry.event === "gateway_tool" && entry.tool === "web_search"
+  );
+  assert.ok(webAudit);
+  assert.deepEqual(
+    {
+      tool: webAudit.tool,
+      result_count: webAudit.result_count
+    },
+    { tool: "web_search", result_count: 1 }
+  );
   assert.equal(decision.action, "reply");
 });
 
 test("RAG tool uses the accepted depth without overflowing tool context", async () => {
   let toolSearchOptions;
   let ragCalls = 0;
+  const audits = [];
   const agent = new GatewayAgent({
     router: fixedRouter(),
     rag: {
@@ -369,6 +504,7 @@ test("RAG tool uses the accepted depth without overflowing tool context", async 
         };
       }
     },
+    audit: { record: (entry) => audits.push(entry) },
     evidenceThreshold: 0.2
   });
 
@@ -387,6 +523,11 @@ test("RAG tool uses the accepted depth without overflowing tool context", async 
   });
 
   assert.deepEqual(toolSearchOptions, { topK: 16 });
+  const toolAudit = audits.find(
+    (entry) => entry.event === "gateway_tool" && entry.tool === "rag_search"
+  );
+  assert.ok(toolAudit);
+  assert.equal(toolAudit.result_count, 16);
 });
 
 test("Gateway agent injects and records persistent conversation context", async () => {
@@ -476,4 +617,46 @@ test("Gateway agent hard-bounds an oversized current message", async () => {
   assert.match(prompt, /开头/);
   assert.match(prompt, /结尾/);
   assert.match(prompt, /已截断/);
+});
+
+test("Gateway agent bounds quoted context without dropping the current question", async () => {
+  let prompt = "";
+  const agent = new GatewayAgent({
+    router: fixedRouter(),
+    rag: { search: async () => [] },
+    exa: { search: async () => [] },
+    runtime: {
+      run: async (input) => {
+        prompt = input.prompt;
+        return {
+          text: "已处理",
+          usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: {} }
+        };
+      }
+    },
+    evidenceThreshold: 0.2,
+    maxPromptTokens: 100
+  });
+
+  await agent.handle({
+    schema_version: "1",
+    message_id: "oversized-quote-1",
+    umo: "private:1",
+    chat_type: "private",
+    sender_id: "1",
+    self_id: "bot",
+    text: "会好用吗",
+    mentions: [],
+    reply_context: {
+      sender_id: "owner",
+      text: `引用开头${"Q".repeat(500)}引用结尾`
+    },
+    timestamp: 1784860800000,
+    is_admin: true,
+    owner_takeover_active: false
+  });
+
+  assert.ok([...prompt].length <= 100);
+  assert.match(prompt, /\[用户问题\]\n会好用吗/);
+  assert.match(prompt, /\[引用消息\]/);
 });

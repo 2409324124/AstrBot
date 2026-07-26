@@ -64,3 +64,30 @@ test("Intent router accepts one JSON object wrapped by model formatting", async 
     isFallback: false
   });
 });
+
+test("Intent router receives quoted and recent context for elliptical questions", async () => {
+  let runInput;
+  const router = new RuntimeIntentRouter({
+    runtime: {
+      run: async (input) => {
+        runInput = input;
+        return {
+          text: '{"route":"technical_concept","confidence":0.97}',
+          usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: {} }
+        };
+      }
+    }
+  });
+
+  const decision = await router.classify({
+    text: "会好用吗",
+    replyContext: { senderId: "owner", text: "直接接 Pi 这个轮子" },
+    recentContext: "用户：我们准备把 AstrBot 接到 Gateway"
+  });
+
+  assert.equal(decision.route, "technical_concept");
+  assert.match(runInput.prompt, /<untrusted_reply_context>/);
+  assert.match(runInput.prompt, /直接接 Pi 这个轮子/);
+  assert.match(runInput.prompt, /<untrusted_recent_context>/);
+  assert.match(runInput.prompt, /<untrusted_user_message>\n会好用吗/);
+});
