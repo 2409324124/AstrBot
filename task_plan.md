@@ -6,7 +6,7 @@
 
 ## 当前阶段
 
-阶段 13：修复管理员私聊回流循环与引用消息语境丢失
+阶段 14：让 `/new` 与 `/reset` 清理 Agent Gateway 会话
 
 ## 各阶段
 
@@ -144,6 +144,19 @@
 - [ ] 用户侧真实 QQ 验证管理员私聊单次回复、群引用追问及号主人工接管无回归
 - **状态：** in_progress
 
+### 阶段 14：Gateway 命令前置截流与会话控制
+
+- [x] 追踪 `/new` 从 QQ 插件到 AstrBot 内置命令、Gateway 与 SQLite 的完整数据流
+- [x] 确认根因：切流插件把 `/new` 当普通消息消费，且 Gateway 没有清空会话接口
+- [x] RED→GREEN：Gateway 提供鉴权、权限校验并与同会话请求串行的 new/reset/stop/stats 接口
+- [x] RED→GREEN：白名单群成员可用 `/new`、`/reset`、`/stop`、`/stats`，管理员私聊可用；均不进入意图/RAG/Web/LLM
+- [x] RED→GREEN：`/help`、`/provider`、显式研究、放行内置命令、禁用命令和未知斜杠命令按安全最小集截流
+- [x] RED→GREEN：持久化 Gateway token 统计；`/new` 清统计、`/reset` 保留统计
+- [x] 提供可逆的 AstrBot 定时任务工具禁用脚本；生产已有任务已确认是零
+- [ ] 完整门禁、备份、提交推送与仅 AstrBot/Gateway 灰度部署
+- [ ] 真实 QQ 验证清空后下一轮不携带旧记忆
+- **状态：** in_progress
+
 ## 已做决策
 
 | 决策 | 理由 |
@@ -166,6 +179,9 @@
 | 一次性切换全部白名单会话 | 先旁路验收，切换失败时通过单一开关恢复旧路径。 |
 | 引用正文优先于旧会话记忆 | 目标群失败消息带有明确 Reply，但插件只传 sender ID；引用是解决省略指代的最窄、最可信上下文。 |
 | 保留 `reportSelfMessage=true` | 号主人工接管依赖自身消息上报；循环改由出站 ID、空输入插件拦截和 Gateway 校验三层消除。 |
+| Gateway 切流期间由 Gateway 实现 `/new`、`/reset` | AstrBot 内置会话与 Gateway SQLite 已是两套状态；只清 AstrBot 会造成“命令成功但历史仍在”。 |
+| 群会话控制权限覆盖全部 Gateway 白名单成员 | 用户已明确选择；白名单外群在 Gateway 前置拒绝，私聊仍只允许管理员。 |
+| 定时任务能力关闭 | 用户明确不需要；移除 Agent 工具暴露并关闭 AstrBot `add_cron_tools`，避免未授权任务和 token 消耗。 |
 
 ## 已知风险与错误
 
@@ -207,6 +223,9 @@
 | 一次 npm 检查在仓库根运行 | 1 | Python 4/4 已通过；改到 `agent-gateway/` 后 Node 8/8 与 typecheck 通过。 |
 | 第一次生产引用 canary 虽回答相关但路由仍为闲聊 | 1 | 增加引用主题优先的语义边界与回归；第二轮稳定路由为技术问题。 |
 | 第二次生产引用 canary 自动注入 16 条低相关 RAG 片段 | 1 | 改为仅本地知识自动 RAG；技术问题保留按需 RAG/Web，第三轮不再出现无关内容。 |
+| 本轮首次读取系统化诊断技能少一层 `ok-skills/` | 1 | 未修改项目；改用技能目录映射中的实际路径并完整读取。 |
+| 首次读取 WakingCheck 使用了旧猜测路径 | 1 | `sed` 只读失败、未改文件；按 `rg` 结果改读 `astrbot/core/pipeline/waking_check/stage.py`。 |
+| 首次秘密扫描 shell 模式引号冲突 | 1 | 命令在解析阶段停止、未扫描或修改；改为对新增 diff 使用不含嵌套引号的模式，结果无命中。 |
 
 ## 备注
 

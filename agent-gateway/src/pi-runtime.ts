@@ -23,6 +23,7 @@ export class PiAgentRuntime {
   readonly #models: Models;
   #model: Model<Api>;
   readonly #timeoutMs: number;
+  readonly #activeAgents = new Map<string, Agent>();
 
   constructor(options: PiAgentRuntimeOptions) {
     this.#models = options.models;
@@ -32,6 +33,15 @@ export class PiAgentRuntime {
 
   setModel(model: Model<Api>): void {
     this.#model = model;
+  }
+
+  abort(sessionId: string): number {
+    const agent = this.#activeAgents.get(sessionId);
+    if (!agent) {
+      return 0;
+    }
+    agent.abort();
+    return 1;
   }
 
   async run(input: AgentRunInput): Promise<AgentRunResult> {
@@ -45,11 +55,15 @@ export class PiAgentRuntime {
       streamFn: this.#models.streamSimple.bind(this.#models),
       toolExecution: "sequential",
     });
+    this.#activeAgents.set(input.sessionId, agent);
     const timeout = setTimeout(() => agent.abort(), this.#timeoutMs);
     try {
       await agent.prompt(input.prompt);
     } finally {
       clearTimeout(timeout);
+      if (this.#activeAgents.get(input.sessionId) === agent) {
+        this.#activeAgents.delete(input.sessionId);
+      }
     }
 
     const message = agent.state.messages.findLast(
@@ -61,12 +75,38 @@ export class PiAgentRuntime {
     if (message.stopReason === "error" || message.stopReason === "aborted") {
       throw new Error(`Agent stopped with ${message.stopReason}`);
     }
+    const usage = agent.state.messages
+      .filter((candidate) => candidate.role === "assistant")
+      .reduce<Usage>(
+        (total, candidate) => ({
+          input: total.input + candidate.usage.input,
+          output: total.output + candidate.usage.output,
+          cacheRead: total.cacheRead + candidate.usage.cacheRead,
+          cacheWrite: total.cacheWrite + candidate.usage.cacheWrite,
+          totalTokens: total.totalTokens + candidate.usage.totalTokens,
+          cost: {
+            input: total.cost.input + candidate.usage.cost.input,
+            output: total.cost.output + candidate.usage.cost.output,
+            cacheRead: total.cost.cacheRead + candidate.usage.cost.cacheRead,
+            cacheWrite: total.cost.cacheWrite + candidate.usage.cost.cacheWrite,
+            total: total.cost.total + candidate.usage.cost.total,
+          },
+        }),
+        {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+          totalTokens: 0,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        },
+      );
     return {
       text: message.content
         .filter((content) => content.type === "text")
         .map((content) => content.text)
         .join(""),
-      usage: message.usage,
+      usage,
     };
   }
 }

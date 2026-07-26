@@ -247,6 +247,25 @@ def test_exa_web_search_config_preserves_a_minimal_reversible_state() -> None:
     assert config["provider_settings"]["verified_factual_reply_policy"] is False
 
 
+def test_agent_safety_disables_and_restores_cron_tools() -> None:
+    module = load_script("configure_agent_safety.py")
+    config = {
+        "provider_settings": {
+            "proactive_capability": {"add_cron_tools": True, "other": "kept"}
+        }
+    }
+
+    state = module.disable_cron_tools(config)
+
+    assert config["provider_settings"]["proactive_capability"] == {
+        "add_cron_tools": False,
+        "other": "kept",
+    }
+    assert state == {"present": True, "value": True}
+    module.restore_cron_tools(config, state)
+    assert config["provider_settings"]["proactive_capability"]["add_cron_tools"] is True
+
+
 def test_napcat_self_messages_are_enabled_only_on_the_active_astrbot_client() -> None:
     module = load_script("configure_napcat_self_messages.py")
     config = {

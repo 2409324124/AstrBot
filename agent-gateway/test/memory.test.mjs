@@ -44,3 +44,46 @@ test("conversation memory rolls old turns into a bounded summary", async () => {
   store.close();
   await rm(directory, { recursive: true, force: true });
 });
+
+test("conversation memory clears only the requested UMO", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "gateway-memory-"));
+  const store = new SqliteGatewayStore(join(directory, "gateway.sqlite3"));
+  const memory = new ConversationMemory({ store, tokenBudget: 200 });
+  memory.record("group:1", "第一群秘密", "第一群回答");
+  memory.record("group:2", "第二群秘密", "第二群回答");
+
+  memory.clear("group:1");
+
+  assert.equal(memory.context("group:1"), "");
+  assert.match(memory.context("group:2"), /第二群秘密/);
+  store.close();
+  await rm(directory, { recursive: true, force: true });
+});
+
+test("session usage survives restart and can be cleared independently", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "gateway-usage-"));
+  const path = join(directory, "gateway.sqlite3");
+  const first = new SqliteGatewayStore(path);
+  first.add("group:1", {
+    input: 11,
+    output: 5,
+    cacheRead: 3,
+    cacheWrite: 1,
+    totalTokens: 20,
+    cost: {}
+  });
+  first.close();
+
+  const second = new SqliteGatewayStore(path);
+  assert.deepEqual(second.get("group:1"), {
+    requests: 1,
+    input: 11,
+    output: 5,
+    cacheRead: 3,
+    cacheWrite: 1
+  });
+  second.clear("group:1");
+  assert.equal(second.get("group:1"), undefined);
+  second.close();
+  await rm(directory, { recursive: true, force: true });
+});

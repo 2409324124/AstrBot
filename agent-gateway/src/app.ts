@@ -32,6 +32,22 @@ export type AdminStore = {
   saveAdminConfig: (config: GatewayAdminConfig) => void;
 };
 
+export type SessionControlAction = "new" | "reset" | "stop" | "stats";
+
+export type SessionControlRequest = {
+  schema_version: "1";
+  session_id: string;
+  action: SessionControlAction;
+  chat_type: "group" | "private";
+  group_id?: string;
+  is_admin: boolean;
+};
+
+export type SessionControlResponse = {
+  status: SessionControlAction;
+  message: string;
+};
+
 export type GatewayEvent = {
   schema_version: "1";
   message_id: string;
@@ -47,6 +63,7 @@ export type GatewayEvent = {
     sender_id: string;
     text: string;
   };
+  force_route?: "external_fact";
   timestamp: number;
   is_admin: boolean;
   owner_takeover_active: boolean;
@@ -76,6 +93,9 @@ type AppOptions = {
   adminStore?: AdminStore;
   initialAdminConfig?: GatewayAdminConfig;
   onModelChange?: (model: string) => Promise<void> | void;
+  handleSessionControl?: (
+    request: SessionControlRequest,
+  ) => Promise<SessionControlResponse>;
 };
 
 function bearerMatches(header: string | undefined, expectedToken: string): boolean {
@@ -108,6 +128,7 @@ function isGatewayEvent(value: unknown): value is GatewayEvent {
     Array.isArray(event.mentions) &&
     event.mentions.every((mention) => typeof mention === "string") &&
     (event.reply_context === undefined || isReplyContext(event.reply_context)) &&
+    (event.force_route === undefined || event.force_route === "external_fact") &&
     typeof event.timestamp === "number" &&
     Number.isFinite(event.timestamp) &&
     typeof event.is_admin === "boolean" &&
@@ -138,6 +159,24 @@ function normalizeAdminConfig(value: unknown): GatewayAdminConfig | undefined {
     model: input.model.trim(),
     groupWhitelist: [...new Set(input.group_whitelist)],
   };
+}
+
+function isSessionControlRequest(value: unknown): value is SessionControlRequest {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const request = value as Partial<SessionControlRequest>;
+  return (
+    request.schema_version === "1" &&
+    typeof request.session_id === "string" &&
+    request.session_id.length > 0 &&
+    request.session_id.length <= 512 &&
+    ["new", "reset", "stop", "stats"].includes(request.action ?? "") &&
+    (request.chat_type === "group" || request.chat_type === "private") &&
+    (request.chat_type !== "group" ||
+      (typeof request.group_id === "string" && /^\d{5,20}$/u.test(request.group_id))) &&
+    typeof request.is_admin === "boolean"
+  );
 }
 
 export function createApp(options: AppOptions): FastifyInstance {
@@ -174,6 +213,29 @@ export function createApp(options: AppOptions): FastifyInstance {
         model: next.model,
         group_whitelist: next.groupWhitelist,
       };
+    });
+  }
+
+  const handleSessionControl = options.handleSessionControl;
+  if (handleSessionControl) {
+    app.post<{ Body: unknown }>("/v1/sessions/control", async (request, reply) => {
+      if (!bearerMatches(request.headers.authorization, options.eventToken)) {
+        return reply.code(401).send({ error: "unauthorized" });
+      }
+      if (!isSessionControlRequest(request.body)) {
+        return reply.code(400).send({ error: "invalid_session_control" });
+      }
+      const control = request.body;
+      const allowed =
+        control.chat_type === "private"
+          ? control.is_admin
+          : Boolean(
+              adminConfig?.groupWhitelist.includes(control.group_id!),
+            );
+      if (!allowed) {
+        return reply.code(403).send({ error: "session_control_forbidden" });
+      }
+      return await handleSessionControl(control);
     });
   }
 

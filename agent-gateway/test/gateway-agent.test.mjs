@@ -64,6 +64,7 @@ test("Gateway agent answers casual dining chat without consulting local RAG", as
   assert.deepEqual(order, ["route", "llm"]);
   assert.doesNotMatch(runInput.prompt, /本地证据|2021_clip/);
   assert.equal(runInput.tools.length, 0);
+  assert.match(runInput.systemPrompt, /无法创建定时任务或提醒/);
   assert.equal(decision.messages[0].text, "食个焗猪扒饭啦。\n（ai生成内容）");
 });
 
@@ -290,6 +291,66 @@ test("Gateway agent routes current external facts to web search without local RA
   assert.match(runInput.systemPrompt, /网页搜索/);
 });
 
+test("explicit research bypasses intent classification and forces web search", async () => {
+  let routerCalls = 0;
+  let webCalls = 0;
+  let runInput;
+  const agent = new GatewayAgent({
+    router: {
+      classify: async () => {
+        routerCalls += 1;
+        return { route: "chat_creative", confidence: 1, isFallback: false };
+      }
+    },
+    rag: { search: async () => [] },
+    exa: {
+      search: async (query, options) => {
+        webCalls += 1;
+        assert.equal(query, "上海限行新规");
+        assert.deepEqual(options, { maxResults: 5 });
+        return [{
+          title: "官方通告",
+          url: "https://example.gov.cn/rules",
+          text: "最新限行范围",
+          publishedDate: "2026-07-27"
+        }];
+      }
+    },
+    runtime: {
+      run: async (input) => {
+        runInput = input;
+        return {
+          text: "已检索。",
+          usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: {} }
+        };
+      }
+    },
+    evidenceThreshold: 0.03
+  });
+
+  await agent.handle({
+    schema_version: "1",
+    message_id: "research-1",
+    umo: "group:709694410",
+    chat_type: "group",
+    group_id: "709694410",
+    sender_id: "member",
+    self_id: "bot-account",
+    text: "上海限行新规",
+    mentions: [],
+    force_route: "external_fact",
+    timestamp: 1784860800000,
+    is_admin: false,
+    owner_takeover_active: false
+  });
+
+  assert.equal(routerCalls, 0);
+  assert.equal(webCalls, 1);
+  assert.deepEqual(runInput.tools.map((tool) => tool.name), ["web_search"]);
+  assert.match(runInput.systemPrompt, /必须调用网页搜索/);
+  assert.match(runInput.prompt, /https:\/\/example\.gov\.cn\/rules/);
+});
+
 test("Gateway agent does not present stored documents as live runtime state", async () => {
   let ragCalls = 0;
   let runInput;
@@ -332,6 +393,154 @@ test("Gateway agent does not present stored documents as live runtime state", as
   assert.deepEqual(runInput.tools.map((tool) => tool.name), ["rag_search"]);
   assert.doesNotMatch(runInput.systemPrompt, /已经执行了本地知识检索/);
   assert.match(runInput.systemPrompt, /实时状态/);
+});
+
+test("session reset aborts an in-flight reply before clearing persistent memory", async () => {
+  const events = [];
+  const audits = [];
+  let finishRun;
+  const runtime = {
+    run: async () => await new Promise((resolve) => {
+      finishRun = resolve;
+    }),
+    abort: () => {
+      events.push("abort");
+      finishRun({
+        text: "不应写回的旧回答",
+        usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 15, cost: {} }
+      });
+      return 1;
+    }
+  };
+  const memory = {
+    context: () => "旧记忆",
+    record: () => events.push("record"),
+    clear: () => events.push("clear")
+  };
+  const agent = new GatewayAgent({
+    router: fixedRouter("chat_creative"),
+    rag: { search: async () => [] },
+    exa: { search: async () => [] },
+    runtime,
+    memory,
+    audit: { record: (entry) => audits.push(entry) },
+    evidenceThreshold: 0.03
+  });
+  const event = {
+    schema_version: "1",
+    message_id: "reset-race-1",
+    umo: "group:709694410",
+    chat_type: "group",
+    group_id: "709694410",
+    sender_id: "member",
+    self_id: "bot-account",
+    text: "慢请求",
+    mentions: [],
+    timestamp: 1784860800000,
+    is_admin: false,
+    owner_takeover_active: false
+  };
+
+  const pendingReply = agent.handle(event);
+  await new Promise((resolve) => setImmediate(resolve));
+  const reset = agent.control(event.umo, "reset");
+
+  assert.deepEqual(await pendingReply, {
+    action: "no_reply",
+    messages: [],
+    reason_code: "session_stopped"
+  });
+  assert.deepEqual(await reset, {
+    status: "reset",
+    message: "会话记忆已清空"
+  });
+  assert.deepEqual(events, ["abort", "clear"]);
+  assert.deepEqual(
+    audits.filter((entry) => entry.event === "gateway_control").map((entry) => ({
+      control_action: entry.control_action,
+      control_result: entry.control_result
+    })),
+    [{ control_action: "reset", control_result: "completed" }]
+  );
+});
+
+test("session stats persist completed router and answer usage while reset retains it", async () => {
+  const totals = new Map();
+  const usage = {
+    add: (sessionId, value) => {
+      const current = totals.get(sessionId) ?? {
+        requests: 0,
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0
+      };
+      current.requests += 1;
+      current.input += value.input;
+      current.output += value.output;
+      current.cacheRead += value.cacheRead;
+      current.cacheWrite += value.cacheWrite;
+      totals.set(sessionId, current);
+    },
+    get: (sessionId) => totals.get(sessionId),
+    clear: (sessionId) => totals.delete(sessionId)
+  };
+  const agent = new GatewayAgent({
+    router: {
+      classify: async (_input, sessionId) => {
+        usage.add(sessionId, {
+          input: 7,
+          output: 3,
+          cacheRead: 2,
+          cacheWrite: 0,
+          totalTokens: 12,
+          cost: {}
+        });
+        return {
+          route: "chat_creative",
+          confidence: 0.99,
+          isFallback: false
+        };
+      }
+    },
+    rag: { search: async () => [] },
+    exa: { search: async () => [] },
+    runtime: {
+      run: async () => ({
+        text: "完成",
+        usage: { input: 20, output: 5, cacheRead: 4, cacheWrite: 1, totalTokens: 30, cost: {} }
+      })
+    },
+    memory: { context: () => "", record: () => undefined, clear: () => undefined },
+    usage,
+    evidenceThreshold: 0.03
+  });
+  const sessionId = "group:709694410";
+  await agent.handle({
+    schema_version: "1",
+    message_id: "usage-1",
+    umo: sessionId,
+    chat_type: "group",
+    group_id: "709694410",
+    sender_id: "member",
+    self_id: "bot-account",
+    text: "你好",
+    mentions: [],
+    timestamp: 1784860800000,
+    is_admin: false,
+    owner_takeover_active: false
+  });
+
+  await agent.control(sessionId, "reset");
+  assert.deepEqual(await agent.control(sessionId, "stats"), {
+    status: "stats",
+    message: "调用 2 次；输入 27，缓存读取 6，缓存写入 1，输出 8，总计 42 tokens"
+  });
+  await agent.control(sessionId, "new");
+  assert.deepEqual(await agent.control(sessionId, "stats"), {
+    status: "stats",
+    message: "当前会话暂无用量记录"
+  });
 });
 
 test("Gateway agent retrieves evidence before calling the LLM", async () => {

@@ -8,7 +8,7 @@ from typing import Any
 from astrbot import logger
 from astrbot.api import star
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
-from astrbot.api.message_components import At, Reply
+from astrbot.api.message_components import At, Plain, Reply
 from astrbot.api.platform import MessageType
 from astrbot.builtin_stars.astrbot.group_chat_context import GroupChatContext
 
@@ -54,6 +54,81 @@ class Main(star.Star):
             event.should_call_llm(False)
             event.stop_event()
             return
+        activated_handlers = event.get_extra("activated_handlers", [])
+        builtin_commands = {
+            handler.handler_name
+            for handler in activated_handlers
+            if handler.handler_module_path
+            == "astrbot.builtin_stars.builtin_commands.main"
+        }
+        force_external_research = any(
+            handler.handler_module_path == "astrbot.builtin_stars.astrbot.main"
+            and handler.handler_name == "research"
+            for handler in activated_handlers
+        )
+        control_actions = {
+            "new_conv": "new",
+            "reset": "reset",
+            "stop": "stop",
+            "stats": "stats",
+        }
+        control_handler = next(
+            (name for name in control_actions if name in builtin_commands),
+            None,
+        )
+        if control_handler:
+            payload: dict[str, Any] = {
+                "schema_version": "1",
+                "session_id": event.unified_msg_origin,
+                "action": control_actions[control_handler],
+                "chat_type": (
+                    "group" if message_type == MessageType.GROUP_MESSAGE else "private"
+                ),
+                "is_admin": bool(event.is_admin()),
+            }
+            if event.get_group_id():
+                payload["group_id"] = str(event.get_group_id())
+            try:
+                response = await self.client.control_session(payload)
+                text = response["message"]
+            except Exception as exc:
+                logger.warning(
+                    "Agent gateway session control failed: action=%s error_type=%s",
+                    control_actions[control_handler],
+                    type(exc).__name__,
+                )
+                text = "会话操作失败，请稍后重试"
+            await event.send(MessageChain().message(text))
+            event.should_call_llm(False)
+            event.stop_event()
+            return
+        if "help" in builtin_commands:
+            await event.send(
+                MessageChain().message(
+                    "命令：/new /reset /stop /stats /research；/sid；管理员可用 /name 和 -astrbot切换"
+                )
+            )
+            event.should_call_llm(False)
+            event.stop_event()
+            return
+        if builtin_commands & {"sid", "name"}:
+            return
+        if "provider" in builtin_commands:
+            await event.send(
+                MessageChain().message("模型切换请使用：-astrbot切换 模型 <ID>")
+            )
+            event.should_call_llm(False)
+            event.stop_event()
+            return
+        if builtin_commands & {
+            "update_dashboard",
+            "set_variable",
+            "unset_variable",
+        }:
+            await event.send(MessageChain().message("此命令已停用"))
+            event.should_call_llm(False)
+            event.stop_event()
+            return
         if self._is_admin_command(normalized):
             if message_type != MessageType.FRIEND_MESSAGE or not event.is_admin():
                 event.should_call_llm(False)
@@ -68,6 +143,17 @@ class Main(star.Star):
                 )
                 response = "切换失败，请检查命令和 Gateway 状态"
             await event.send(MessageChain().message(f"{response}（ai生成内容）"))
+            event.should_call_llm(False)
+            event.stop_event()
+            return
+        raw_slash_command = any(
+            isinstance(component, Plain) and component.text.lstrip().startswith("/")
+            for component in event.get_messages()
+        )
+        if raw_slash_command and not force_external_research:
+            await event.send(
+                MessageChain().message("未知或未启用的命令；使用 /help 查看可用命令")
+            )
             event.should_call_llm(False)
             event.stop_event()
             return
@@ -91,8 +177,9 @@ class Main(star.Star):
                     event.should_call_llm(False)
                     event.stop_event()
                     return
-                if not event.is_at_or_wake_command and not await self.group_context.need_active_reply(
-                    event
+                if (
+                    not event.is_at_or_wake_command
+                    and not await self.group_context.need_active_reply(event)
                 ):
                     event.should_call_llm(False)
                     event.stop_event()
@@ -135,10 +222,14 @@ class Main(star.Star):
             "self_id": str(event.get_self_id()),
             "text": normalized,
             "mentions": mentions,
-            "timestamp": int(float(timestamp) * 1000) if timestamp else int(time.time() * 1000),
+            "timestamp": int(float(timestamp) * 1000)
+            if timestamp
+            else int(time.time() * 1000),
             "is_admin": bool(event.is_admin()),
             "owner_takeover_active": owner_takeover_active,
         }
+        if force_external_research:
+            payload["force_route"] = "external_fact"
         if event.get_group_id():
             payload["group_id"] = str(event.get_group_id())
         if reply_sender:
@@ -200,11 +291,7 @@ class Main(star.Star):
             if len(parts) == 2 and parts[1] in {"列表", "查看"}:
                 groups = "、".join(config["group_whitelist"]) or "无"
                 return f"群白名单：{groups}"
-            if (
-                len(parts) == 3
-                and parts[1] in {"添加", "删除"}
-                and parts[2].isdigit()
-            ):
+            if len(parts) == 3 and parts[1] in {"添加", "删除"} and parts[2].isdigit():
                 action, group_id = parts[1], parts[2]
                 groups = list(dict.fromkeys(config["group_whitelist"]))
                 if action == "添加" and group_id not in groups:

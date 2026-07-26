@@ -8,10 +8,11 @@ import type {
   GatewayAdminConfig,
   GatewayResponse,
 } from "./app.ts";
+import type { SessionUsage, UsagePort } from "./gateway-agent.ts";
 import type { ConversationState, ConversationStore } from "./memory.ts";
 
 export class SqliteGatewayStore
-  implements DecisionStore, AdminStore, ConversationStore
+  implements DecisionStore, AdminStore, ConversationStore, UsagePort
 {
   readonly #database: DatabaseSync;
 
@@ -38,6 +39,17 @@ export class SqliteGatewayStore
       CREATE TABLE IF NOT EXISTS gateway_settings (
         setting_key TEXT PRIMARY KEY,
         value_json TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      ) STRICT
+    `);
+    this.#database.exec(`
+      CREATE TABLE IF NOT EXISTS session_usage (
+        session_id TEXT PRIMARY KEY,
+        requests INTEGER NOT NULL,
+        input_tokens INTEGER NOT NULL,
+        output_tokens INTEGER NOT NULL,
+        cache_read_tokens INTEGER NOT NULL,
+        cache_write_tokens INTEGER NOT NULL,
         updated_at INTEGER NOT NULL
       ) STRICT
     `);
@@ -103,6 +115,78 @@ export class SqliteGatewayStore
            updated_at = excluded.updated_at`,
       )
       .run(sessionId, JSON.stringify(state), Date.now());
+  }
+
+  deleteConversation(sessionId: string): void {
+    this.#database
+      .prepare("DELETE FROM conversation_state WHERE session_id = ?")
+      .run(sessionId);
+  }
+
+  add(
+    sessionId: string,
+    usage: {
+      input: number;
+      output: number;
+      cacheRead: number;
+      cacheWrite: number;
+    },
+  ): void {
+    this.#database
+      .prepare(
+        `INSERT INTO session_usage (
+           session_id, requests, input_tokens, output_tokens,
+           cache_read_tokens, cache_write_tokens, updated_at
+         ) VALUES (?, 1, ?, ?, ?, ?, ?)
+         ON CONFLICT(session_id) DO UPDATE SET
+           requests = requests + 1,
+           input_tokens = input_tokens + excluded.input_tokens,
+           output_tokens = output_tokens + excluded.output_tokens,
+           cache_read_tokens = cache_read_tokens + excluded.cache_read_tokens,
+           cache_write_tokens = cache_write_tokens + excluded.cache_write_tokens,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        sessionId,
+        usage.input,
+        usage.output,
+        usage.cacheRead,
+        usage.cacheWrite,
+        Date.now(),
+      );
+  }
+
+  get(sessionId: string): SessionUsage | undefined {
+    const row = this.#database
+      .prepare(
+        `SELECT requests, input_tokens, output_tokens,
+                cache_read_tokens, cache_write_tokens
+         FROM session_usage WHERE session_id = ?`,
+      )
+      .get(sessionId) as
+      | {
+          requests: number;
+          input_tokens: number;
+          output_tokens: number;
+          cache_read_tokens: number;
+          cache_write_tokens: number;
+        }
+      | undefined;
+    return row
+      ? {
+          requests: row.requests,
+          input: row.input_tokens,
+          output: row.output_tokens,
+          cacheRead: row.cache_read_tokens,
+          cacheWrite: row.cache_write_tokens,
+        }
+      : undefined;
+  }
+
+  clear(sessionId: string): void {
+    this.#database
+      .prepare("DELETE FROM session_usage WHERE session_id = ?")
+      .run(sessionId);
   }
 
   close(): void {

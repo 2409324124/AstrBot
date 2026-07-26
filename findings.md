@@ -220,3 +220,12 @@
 - `technical_concept` 不应等价于“自动注入本地知识库”。融合检索分数不能直接证明主题相关，自动 Top-K 会把模型推向本地语料，即使路由本身已经正确。
 - 稳定边界是：`local_knowledge` 自动检索并注入本地证据；`technical_concept` 不自动注入，但同时开放 `rag_search` 与 `web_search`，由 Agent 根据问题选择。
 - 生产 canary 必须同时检查 route、automatic_rag_hits、工具调用和输出相关性；只检查“是否有回复”会漏掉错误路由与隐性知识污染。
+
+## 2026-07-27 `/new` 无法清空会话的根因
+
+- 切流插件的高优先级事件处理会消费所有符合条件的 QQ 消息；它只特殊识别模型/白名单管理命令，没有把 `/new` 或 `/reset` 交给会话控制路径。
+- 因此命令被作为普通用户文本提交给 `/v1/events`，随后插件停止旧 AstrBot 事件，内置 `ConversationCommands.new_conv()` 根本不会执行。
+- 即使放行内置命令，它也只会新建或重置 AstrBot 数据库里的 conversation；当前有效记忆位于 Gateway SQLite 的 `conversation_state`，仍不会被清除。
+- 修复必须在 Gateway 公共接口完成，并与相同 UMO 的在途 Agent 请求串行，避免 reset 后旧请求完成又把历史写回来。
+- 用户选择的权限边界是：白名单群成员均可控制本群会话；白名单外群拒绝；私聊只有 AstrBot 管理员可控制。
+- 生产未安装定时任务插件，`cron_jobs` 表为零条，但 AstrBot 配置仍有 `provider_settings.proactive_capability.add_cron_tools=true`，需要显式关闭。

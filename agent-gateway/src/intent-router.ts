@@ -7,10 +7,12 @@ import type { AgentRunInput, AgentRunResult } from "./pi-runtime.ts";
 
 type RuntimePort = {
   run: (input: AgentRunInput) => Promise<AgentRunResult>;
+  abort?: (sessionId: string) => number;
 };
 
 type RuntimeIntentRouterOptions = {
   runtime: RuntimePort;
+  onUsage?: (sessionId: string, usage: AgentRunResult["usage"]) => void;
 };
 
 const ROUTES = new Set<IntentRoute>([
@@ -96,12 +98,21 @@ function parseDecision(text: string): IntentDecision | undefined {
 
 export class RuntimeIntentRouter {
   readonly #runtime: RuntimePort;
+  readonly #onUsage: RuntimeIntentRouterOptions["onUsage"];
 
   constructor(options: RuntimeIntentRouterOptions) {
     this.#runtime = options.runtime;
+    this.#onUsage = options.onUsage;
   }
 
-  async classify(input: string | IntentRoutingInput): Promise<IntentDecision> {
+  abort(sessionId: string): number {
+    return this.#runtime.abort?.(`intent-router:${sessionId}`) ?? 0;
+  }
+
+  async classify(
+    input: string | IntentRoutingInput,
+    sessionId = "shared",
+  ): Promise<IntentDecision> {
     const normalized = typeof input === "string" ? { text: input } : input;
     const sections: string[] = [];
     if (normalized.replyContext?.text) {
@@ -119,11 +130,12 @@ export class RuntimeIntentRouter {
     );
     try {
       const result = await this.#runtime.run({
-        sessionId: "intent-router",
+        sessionId: `intent-router:${sessionId}`,
         systemPrompt: SYSTEM_PROMPT,
         prompt: sections.join("\n\n"),
         tools: [],
       });
+      this.#onUsage?.(sessionId, result.usage);
       return parseDecision(result.text) ?? fallbackDecision();
     } catch {
       return fallbackDecision();

@@ -261,3 +261,105 @@ test("event API rejects oversized quoted context before calling the agent", asyn
   assert.equal(calls, 0);
   await app.close();
 });
+
+test("authenticated session reset is handled without entering the event agent", async () => {
+  let eventCalls = 0;
+  const controls = [];
+  const app = createApp({
+    eventToken: "event-secret",
+    initialAdminConfig: {
+      model: "deepseek-v4-pro",
+      groupWhitelist: ["709694410"]
+    },
+    handleEvent: async () => {
+      eventCalls += 1;
+      return { action: "reply", messages: [], reason_code: "called" };
+    },
+    handleSessionControl: async (request) => {
+      controls.push(request);
+      return { status: "reset", message: "会话记忆已清空" };
+    }
+  });
+
+  const response = await app.inject({
+    method: "POST",
+    url: "/v1/sessions/control",
+    headers: { authorization: "Bearer event-secret" },
+    payload: {
+      schema_version: "1",
+      session_id: "aiocqhttp:GroupMessage:709694410",
+      action: "reset",
+      chat_type: "group",
+      group_id: "709694410",
+      is_admin: false
+    }
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.json(), {
+    status: "reset",
+    message: "会话记忆已清空"
+  });
+  assert.deepEqual(controls, [{
+    schema_version: "1",
+    session_id: "aiocqhttp:GroupMessage:709694410",
+    action: "reset",
+    chat_type: "group",
+    group_id: "709694410",
+    is_admin: false
+  }]);
+  assert.equal(eventCalls, 0);
+  await app.close();
+});
+
+test("session controls reject untrusted private and non-whitelisted group callers", async () => {
+  let calls = 0;
+  const app = createApp({
+    eventToken: "event-secret",
+    initialAdminConfig: {
+      model: "deepseek-v4-pro",
+      groupWhitelist: ["709694410"]
+    },
+    handleEvent: async () => ({ action: "no_reply", messages: [], reason_code: "unused" }),
+    handleSessionControl: async (request) => {
+      calls += 1;
+      return { status: request.action, message: "ok" };
+    }
+  });
+  const base = {
+    schema_version: "1",
+    session_id: "session",
+    action: "stop",
+    chat_type: "private",
+    is_admin: false
+  };
+
+  const unauthorized = await app.inject({
+    method: "POST",
+    url: "/v1/sessions/control",
+    payload: base
+  });
+  const privateMember = await app.inject({
+    method: "POST",
+    url: "/v1/sessions/control",
+    headers: { authorization: "Bearer event-secret" },
+    payload: base
+  });
+  const outsideGroup = await app.inject({
+    method: "POST",
+    url: "/v1/sessions/control",
+    headers: { authorization: "Bearer event-secret" },
+    payload: {
+      ...base,
+      chat_type: "group",
+      group_id: "1043304585",
+      is_admin: true
+    }
+  });
+
+  assert.equal(unauthorized.statusCode, 401);
+  assert.equal(privateMember.statusCode, 403);
+  assert.equal(outsideGroup.statusCode, 403);
+  assert.equal(calls, 0);
+  await app.close();
+});

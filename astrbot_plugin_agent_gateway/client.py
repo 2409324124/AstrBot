@@ -38,6 +38,31 @@ class GatewayClient:
             raise RuntimeError("invalid gateway decision")
         return decision
 
+    async def control_session(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Apply one authenticated control action to a Gateway session.
+
+        Args:
+            payload: Session identity, permission context, and control action.
+
+        Returns:
+            Validated deterministic control response.
+
+        Raises:
+            RuntimeError: If the Gateway response is invalid.
+            httpx.HTTPError: If the request fails.
+        """
+        response = await self._client.post("/v1/sessions/control", json=payload)
+        response.raise_for_status()
+        result = response.json()
+        if result.get("status") not in {
+            "new",
+            "reset",
+            "stop",
+            "stats",
+        } or not isinstance(result.get("message"), str):
+            raise RuntimeError("invalid gateway session control response")
+        return result
+
     async def get_admin_config(self) -> dict[str, Any]:
         """Read the active model and group whitelist from the Gateway."""
         response = await self._client.get(

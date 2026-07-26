@@ -351,3 +351,20 @@
 - 第二轮 route 已为 `technical_concept`，但自动注入 16 条 RAG 证据并出现无关内容，因此再次未判通过。
 - 第三轮通过：空事件 400；引用事件 200/reply；route=`technical_concept`、automatic_rag_hits=0；模型按需调用 RAG 与 Web，最终无无关知识库内容。
 - Gateway `/healthz`、`/readyz` 均正常；AstrBot 插件重新加载且启动日志无错误。最终仍等待用户侧真实 QQ 私聊与群引用烟测。
+
+## 2026-07-27：Gateway 会话清空命令
+
+- **状态：** in_progress
+- 用户报告 `/new` 无法清空当前 AstrBot 会话。
+- 完整追踪确认 `/new` 被切流插件作为普通消息发往 Gateway，AstrBot 内置命令未执行；Gateway SQLite 又没有 reset API。
+- 目标行为锁定为：Gateway 白名单群中的任意成员可使用 `/new`、`/reset`、`/stop`、`/stats`；私聊仍只允许管理员。命令不调用路由、RAG、Web 或 LLM，并与同会话在途请求正确串行。
+- 命令范围采用安全最小集：Gateway 自管 help/new/reset/stop/stats/research，sid 与管理员 name 放行 AstrBot，provider 重定向到 Gateway 管理命令，dashboard_update/set/unset 与未知斜杠命令直接拒绝。
+- 用户明确要求不启用定时任务；生产数据库审计为零条任务，实施时关闭 `provider_settings.proactive_capability.add_cron_tools`。
+- 首次读取系统化诊断技能少了 `ok-skills/` 路径层级；未修改项目，已按实际路径完整读取。
+- RED→GREEN：新增事件 token 鉴权的 `/v1/sessions/control`，白名单群成员可控制本群 UMO，私聊非管理员和白名单外群在控制器执行前返回 403。
+- RED→GREEN：Gateway 以 generation + 同 UMO 队列处理 reset/new 与在途请求竞态；先取消 Router/Pi Agent，再等待退出并清 SQLite，旧回答不会重新写回。
+- RED→GREEN：SQLite 新增 `session_usage`，累计路由与主 Agent 的完整工具循环用量；reset 保留，new 清除，stats 不调用模型。
+- RED→GREEN：QQ 入口按 AstrBot 已激活 handler 元数据截流 help/new/reset/stop/stats/provider/sid/name/research，并拒绝 dashboard_update/set/unset 与未知斜杠命令。
+- RED→GREEN：显式 research 跳过意图分类并在主模型前实际执行 Exa；网页证据有界注入。
+- RED→GREEN：新增可逆 `configure_agent_safety`，只关闭 `add_cron_tools` 并保存最小恢复状态；Gateway 本身不暴露定时任务工具。
+- 本地完整门禁：Node 8 个测试文件、TypeScript strict、Python 70 项相关回归、Ruff、compileall、Compose config、diff-check 与新增 diff 秘密扫描均通过。

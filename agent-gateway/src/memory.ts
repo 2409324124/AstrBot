@@ -11,6 +11,7 @@ export type ConversationState = {
 export type ConversationStore = {
   getConversation: (sessionId: string) => ConversationState | undefined;
   saveConversation: (sessionId: string, state: ConversationState) => void;
+  deleteConversation: (sessionId: string) => void;
 };
 
 type ConversationMemoryOptions = {
@@ -55,6 +56,10 @@ export class ConversationMemory {
     return render(
       this.#store.getConversation(sessionId) ?? { summary: "", exchanges: [] },
     );
+  }
+
+  clear(sessionId: string): void {
+    this.#store.deleteConversation(sessionId);
   }
 
   record(sessionId: string, user: string, assistant: string): void {

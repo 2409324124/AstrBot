@@ -3,7 +3,12 @@ import { createHash } from "node:crypto";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
 
-import type { GatewayDecision, GatewayEvent } from "./app.ts";
+import type {
+  GatewayDecision,
+  GatewayEvent,
+  SessionControlAction,
+  SessionControlResponse,
+} from "./app.ts";
 import type { ExaSearchResult } from "./exa.ts";
 import type { AgentRunInput, AgentRunResult } from "./pi-runtime.ts";
 import type { RagHit } from "./rag.ts";
@@ -14,6 +19,7 @@ type RagPort = {
 
 type RuntimePort = {
   run: (input: AgentRunInput) => Promise<AgentRunResult>;
+  abort?: (sessionId: string) => number;
 };
 
 type ExaPort = {
@@ -26,10 +32,29 @@ type ExaPort = {
 type MemoryPort = {
   context: (sessionId: string) => string;
   record: (sessionId: string, user: string, assistant: string) => void;
+  clear?: (sessionId: string) => void;
+};
+
+export type SessionUsage = {
+  requests: number;
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+};
+
+export type UsagePort = {
+  add: (sessionId: string, usage: AgentRunResult["usage"]) => void;
+  get: (sessionId: string) => SessionUsage | undefined;
+  clear: (sessionId: string) => void;
 };
 
 export type GatewayAuditEntry = {
-  event: "gateway_route" | "gateway_tool" | "gateway_reply";
+  event:
+    | "gateway_route"
+    | "gateway_tool"
+    | "gateway_reply"
+    | "gateway_control";
   session_ref: string;
   route?: IntentRoute;
   confidence?: number;
@@ -40,6 +65,8 @@ export type GatewayAuditEntry = {
   result_count?: number;
   action?: "reply" | "no_reply";
   reason_code?: string;
+  control_action?: SessionControlAction;
+  control_result?: "completed" | "stopped" | "idle";
   duration_ms: number;
 };
 
@@ -70,7 +97,11 @@ export type IntentRoutingInput = {
 };
 
 type IntentRouterPort = {
-  classify: (input: IntentRoutingInput) => Promise<IntentDecision>;
+  classify: (
+    input: IntentRoutingInput,
+    sessionId?: string,
+  ) => Promise<IntentDecision>;
+  abort?: (sessionId: string) => number;
 };
 
 type GatewayAgentOptions = {
@@ -80,6 +111,7 @@ type GatewayAgentOptions = {
   exa: ExaPort;
   evidenceThreshold: number;
   memory?: MemoryPort;
+  usage?: UsagePort;
   audit?: AuditPort;
   maxPromptTokens?: number;
 };
@@ -150,9 +182,11 @@ export class GatewayAgent {
   readonly #exa: ExaPort;
   readonly #evidenceThreshold: number;
   readonly #memory: MemoryPort | undefined;
+  readonly #usage: UsagePort | undefined;
   readonly #audit: AuditPort | undefined;
   readonly #maxPromptTokens: number;
   readonly #sessionQueues = new Map<string, Promise<void>>();
+  readonly #sessionGenerations = new Map<string, number>();
 
   constructor(options: GatewayAgentOptions) {
     this.#router = options.router;
@@ -161,13 +195,17 @@ export class GatewayAgent {
     this.#exa = options.exa;
     this.#evidenceThreshold = options.evidenceThreshold;
     this.#memory = options.memory;
+    this.#usage = options.usage;
     this.#audit = options.audit;
     this.#maxPromptTokens = options.maxPromptTokens ?? 12288;
   }
 
   async handle(event: GatewayEvent): Promise<GatewayDecision> {
+    const generation = this.#sessionGenerations.get(event.umo) ?? 0;
     const previous = this.#sessionQueues.get(event.umo) ?? Promise.resolve();
-    const run = previous.then(async () => await this.#handleSerial(event));
+    const run = previous.then(
+      async () => await this.#handleSerial(event, generation),
+    );
     const tail = run.then(
       () => undefined,
       () => undefined,
@@ -182,7 +220,76 @@ export class GatewayAgent {
     }
   }
 
-  async #handleSerial(event: GatewayEvent): Promise<GatewayDecision> {
+  async control(
+    sessionId: string,
+    action: SessionControlAction,
+  ): Promise<SessionControlResponse> {
+    const startedAt = Date.now();
+    const sessionRef = createHash("sha256")
+      .update(sessionId)
+      .digest("hex")
+      .slice(0, 12);
+    const recordControl = (
+      result: "completed" | "stopped" | "idle",
+    ): void => {
+      this.#audit?.record({
+        event: "gateway_control",
+        session_ref: sessionRef,
+        control_action: action,
+        control_result: result,
+        duration_ms: Date.now() - startedAt,
+      });
+    };
+    if (action === "stats") {
+      await (this.#sessionQueues.get(sessionId) ?? Promise.resolve());
+      const usage = this.#usage?.get(sessionId);
+      if (!usage) {
+        recordControl("completed");
+        return { status: "stats", message: "当前会话暂无用量记录" };
+      }
+      const total =
+        usage.input + usage.output + usage.cacheRead + usage.cacheWrite;
+      const response: SessionControlResponse = {
+        status: "stats",
+        message: `调用 ${usage.requests} 次；输入 ${usage.input}，缓存读取 ${usage.cacheRead}，缓存写入 ${usage.cacheWrite}，输出 ${usage.output}，总计 ${total} tokens`,
+      };
+      recordControl("completed");
+      return response;
+    }
+
+    this.#sessionGenerations.set(
+      sessionId,
+      (this.#sessionGenerations.get(sessionId) ?? 0) + 1,
+    );
+    const stopped =
+      (this.#router.abort?.(sessionId) ?? 0) +
+      (this.#runtime.abort?.(sessionId) ?? 0);
+    if (action === "stop") {
+      const response: SessionControlResponse = {
+        status: "stop",
+        message: stopped > 0 ? "已停止当前任务" : "当前没有运行中的任务",
+      };
+      recordControl(stopped > 0 ? "stopped" : "idle");
+      return response;
+    }
+
+    await (this.#sessionQueues.get(sessionId) ?? Promise.resolve());
+    this.#memory?.clear?.(sessionId);
+    if (action === "new") {
+      this.#usage?.clear(sessionId);
+    }
+    const response: SessionControlResponse = {
+      status: action,
+      message: action === "new" ? "已开始新会话" : "会话记忆已清空",
+    };
+    recordControl("completed");
+    return response;
+  }
+
+  async #handleSerial(
+    event: GatewayEvent,
+    generation: number,
+  ): Promise<GatewayDecision> {
     const startedAt = Date.now();
     const sessionRef = createHash("sha256")
       .update(event.umo)
@@ -207,11 +314,24 @@ export class GatewayAgent {
           text: event.reply_context.text,
         }
       : undefined;
-    const intent = await this.#router.classify({
-      text: event.text,
-      ...(replyContext ? { replyContext } : {}),
-      ...(memory ? { recentContext: tail(memory, 1200) } : {}),
-    });
+    const intent: IntentDecision = event.force_route
+      ? {
+          route: event.force_route,
+          confidence: 1,
+          isFallback: false,
+        }
+      : await this.#router.classify(
+          {
+            text: event.text,
+            ...(replyContext ? { replyContext } : {}),
+            ...(memory ? { recentContext: tail(memory, 1200) } : {}),
+          },
+          event.umo,
+        );
+    if ((this.#sessionGenerations.get(event.umo) ?? 0) !== generation) {
+      recordReplyAudit("no_reply", "session_stopped");
+      return { action: "no_reply", messages: [], reason_code: "session_stopped" };
+    }
     const isCasualChat =
       intent.route === "chat_creative" && !intent.isFallback;
     const usesAutomaticRag =
@@ -219,9 +339,30 @@ export class GatewayAgent {
     const retrievalQuery = replyContext
       ? `${replyContext.text}\n${event.text}`
       : event.text;
+    const forcedWebStartedAt = Date.now();
+    const forcedWebResults = event.force_route
+      ? await this.#exa.search(retrievalQuery, { maxResults: 5 })
+      : [];
+    if (event.force_route) {
+      this.#audit?.record({
+        event: "gateway_tool",
+        session_ref: sessionRef,
+        tool: "web_search",
+        result_count: forcedWebResults.length,
+        duration_ms: Date.now() - forcedWebStartedAt,
+      });
+    }
+    if ((this.#sessionGenerations.get(event.umo) ?? 0) !== generation) {
+      recordReplyAudit("no_reply", "session_stopped");
+      return { action: "no_reply", messages: [], reason_code: "session_stopped" };
+    }
     const initialHits = usesAutomaticRag
       ? await this.#rag.search(retrievalQuery, { topK: 16 })
       : [];
+    if ((this.#sessionGenerations.get(event.umo) ?? 0) !== generation) {
+      recordReplyAudit("no_reply", "session_stopped");
+      return { action: "no_reply", messages: [], reason_code: "session_stopped" };
+    }
     const evidence = initialHits.filter(
       (hit) => hit.score >= this.#evidenceThreshold,
     );
@@ -315,16 +456,23 @@ export class GatewayAgent {
         };
       },
     };
-    const evidenceBlock = !usesAutomaticRag
-      ? ""
-      : evidence.length
-      ? evidence
+    const evidenceBlock = forcedWebResults.length
+      ? forcedWebResults
           .map(
-            (hit, index) =>
-              `[本地证据 ${index + 1}] ${hit.text}\n来源: ${hit.source}`,
+            (result, index) =>
+              `[网页证据 ${index + 1}] ${result.title}\n${result.url}\n${result.text}`,
           )
           .join("\n\n")
-      : "[本地证据] 未检索到达到阈值的内容。";
+      : !usesAutomaticRag
+        ? ""
+        : evidence.length
+          ? evidence
+              .map(
+                (hit, index) =>
+                  `[本地证据 ${index + 1}] ${hit.text}\n来源: ${hit.source}`,
+              )
+              .join("\n\n")
+          : "[本地证据] 未检索到达到阈值的内容。";
     const questionBudget = Math.max(1, Math.floor(this.#maxPromptTokens * 0.6));
     const userLabel = "[用户问题]\n";
     const userBudget = replyContext
@@ -370,22 +518,28 @@ export class GatewayAgent {
           : intent.route === "technical_concept"
             ? [ragTool, webTool]
             : [ragTool];
+    const baseSystemPrompt = intent.isFallback
+      ? FALLBACK_SYSTEM_PROMPT
+      : isCasualChat
+        ? CHAT_SYSTEM_PROMPT
+        : intent.route === "external_fact"
+          ? EXTERNAL_SYSTEM_PROMPT
+          : intent.route === "local_runtime"
+            ? LOCAL_RUNTIME_SYSTEM_PROMPT
+            : intent.route === "technical_concept"
+              ? TECHNICAL_SYSTEM_PROMPT
+              : SYSTEM_PROMPT;
     const result = await this.#runtime.run({
       sessionId: event.umo,
-      systemPrompt: intent.isFallback
-        ? FALLBACK_SYSTEM_PROMPT
-        : isCasualChat
-          ? CHAT_SYSTEM_PROMPT
-          : intent.route === "external_fact"
-            ? EXTERNAL_SYSTEM_PROMPT
-            : intent.route === "local_runtime"
-              ? LOCAL_RUNTIME_SYSTEM_PROMPT
-              : intent.route === "technical_concept"
-                ? TECHNICAL_SYSTEM_PROMPT
-                : SYSTEM_PROMPT,
+      systemPrompt: `${baseSystemPrompt}\n你无法创建定时任务或提醒，不得声称已经创建、安排或将在未来主动执行。`,
       prompt,
       tools,
     });
+    if ((this.#sessionGenerations.get(event.umo) ?? 0) !== generation) {
+      recordReplyAudit("no_reply", "session_stopped");
+      return { action: "no_reply", messages: [], reason_code: "session_stopped" };
+    }
+    this.#usage?.add(event.umo, result.usage);
     const text = result.text
       .replace(/[（(]\s*(?:AI|ai)生成内容\s*[）)]/gu, "")
       .trim();

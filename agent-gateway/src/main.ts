@@ -93,8 +93,18 @@ export function buildApp(env: NodeJS.ProcessEnv) {
     model: routerModel,
     timeoutMs: config.routerTimeoutMs,
   });
+  const memory = new ConversationMemory({
+    store,
+    tokenBudget: Math.max(
+      1024,
+      config.contextWindow - config.maxOutputTokens - 4096,
+    ),
+  });
   const gatewayAgent = new GatewayAgent({
-    router: new RuntimeIntentRouter({ runtime: routerRuntime }),
+    router: new RuntimeIntentRouter({
+      runtime: routerRuntime,
+      onUsage: (sessionId, usage) => store.add(sessionId, usage),
+    }),
     audit: {
       record: (entry) => console.info(JSON.stringify(entry)),
     },
@@ -102,13 +112,8 @@ export function buildApp(env: NodeJS.ProcessEnv) {
     runtime,
     exa: new ExaSearchClient({ apiKey: config.exaApiKey }),
     evidenceThreshold: config.ragEvidenceThreshold,
-    memory: new ConversationMemory({
-      store,
-      tokenBudget: Math.max(
-        1024,
-        config.contextWindow - config.maxOutputTokens - 4096,
-      ),
-    }),
+    memory,
+    usage: store,
     maxPromptTokens: Math.max(
       1024,
       config.contextWindow - config.maxOutputTokens - 1024,
@@ -127,6 +132,8 @@ export function buildApp(env: NodeJS.ProcessEnv) {
       runtime.setModel({ ...model, id: modelId, name: modelId });
     },
     handleEvent: gatewayAgent.handle.bind(gatewayAgent),
+    handleSessionControl: async (request) =>
+      await gatewayAgent.control(request.session_id, request.action),
   });
   app.get("/healthz", async () => ({ status: "ok" }));
   app.get("/readyz", async (_request, reply) => {

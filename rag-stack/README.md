@@ -83,6 +83,18 @@ quoted question back to the bot. A normal member saying e.g. `这群别开bot`
 mutes the bot for 30 minutes in that group; group admins and the shared human
 account bypass this temporary social mute.
 
+Scheduled-task tools are intentionally disabled for this deployment. Apply the
+reversible AstrBot configuration guard after the container is healthy:
+
+```bash
+./scripts/configure_agent_safety.sh apply
+```
+
+It changes only `provider_settings.proactive_capability.add_cron_tools`, saves
+the previous value in ignored `runtime/agent-safety-backup.json`, and can be
+reverted with `./scripts/configure_agent_safety.sh restore`. The independent
+Gateway exposes no cron or reminder tool.
+
 ## Paths and services
 
 - Stack files: `/home/miku/astrbot-deploy/AstrBot/rag-stack`

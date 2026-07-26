@@ -77,6 +77,7 @@ test("Pi runtime executes a tool and returns the follow-up answer", async () => 
   assert.equal(searched, "Xeon Max 9470C");
   assert.equal(result.text, "9470C 为 52 核 Xeon Max。");
   assert.equal(faux.state.callCount, 2);
+  assert.ok(result.usage.output > Math.ceil(result.text.length / 4));
 });
 
 test("Pi runtime switches model without recreating the gateway", async () => {
@@ -103,4 +104,29 @@ test("Pi runtime switches model without recreating the gateway", async () => {
   assert.equal(result.text, "本地模型已接管");
   assert.equal(online.state.callCount, 0);
   assert.equal(local.state.callCount, 1);
+});
+
+test("Pi runtime aborts only the active session", async () => {
+  const faux = fauxProvider({ tokensPerSecond: 100 });
+  const models = createModels();
+  models.setProvider(faux.provider);
+  faux.setResponses([fauxAssistantMessage("这是一段足够长的慢速回答，用于验证会话取消。")]);
+  const runtime = new PiAgentRuntime({
+    models,
+    model: faux.getModel(),
+    timeoutMs: 10000
+  });
+
+  const pending = runtime.run({
+    sessionId: "group:slow",
+    systemPrompt: "回答。",
+    prompt: "慢速测试",
+    tools: []
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(runtime.abort("group:other"), 0);
+  assert.equal(runtime.abort("group:slow"), 1);
+  await assert.rejects(pending, /aborted/i);
+  assert.equal(runtime.abort("group:slow"), 0);
 });
