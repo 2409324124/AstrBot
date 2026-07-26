@@ -69,7 +69,7 @@ test("Gateway agent answers casual dining chat without consulting local RAG", as
 
 test("Gateway agent resolves an elliptical question from quoted context", async () => {
   let routerInput;
-  let ragQuery;
+  let ragCalls = 0;
   let runInput;
   const agent = new GatewayAgent({
     router: {
@@ -79,8 +79,8 @@ test("Gateway agent resolves an elliptical question from quoted context", async 
       }
     },
     rag: {
-      search: async (query) => {
-        ragQuery = query;
+      search: async () => {
+        ragCalls += 1;
         return [];
       }
     },
@@ -125,11 +125,14 @@ test("Gateway agent resolves an elliptical question from quoted context", async 
     replyContext: { senderId: "owner", text: "直接接 Pi 这个轮子" },
     recentContext: "用户：准备把 AstrBot 接到独立 Gateway"
   });
-  assert.match(ragQuery, /直接接 Pi 这个轮子/);
-  assert.match(ragQuery, /会好用吗/);
+  assert.equal(ragCalls, 0);
   assert.match(runInput.prompt, /\[引用消息\]\n直接接 Pi 这个轮子/);
   assert.match(runInput.prompt, /\[用户问题\]\n会好用吗/);
   assert.match(runInput.systemPrompt, /不要仅以.*知识库.*没有/);
+  assert.deepEqual(
+    runInput.tools.map((tool) => tool.name),
+    ["rag_search", "web_search"],
+  );
   assert.equal(decision.action, "reply");
 });
 

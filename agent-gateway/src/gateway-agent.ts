@@ -215,8 +215,7 @@ export class GatewayAgent {
     const isCasualChat =
       intent.route === "chat_creative" && !intent.isFallback;
     const usesAutomaticRag =
-      !intent.isFallback &&
-      ["local_knowledge", "technical_concept"].includes(intent.route);
+      !intent.isFallback && intent.route === "local_knowledge";
     const retrievalQuery = replyContext
       ? `${replyContext.text}\n${event.text}`
       : event.text;
