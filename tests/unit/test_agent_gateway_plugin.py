@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-from astrbot.api.message_components import Plain, Reply
+from astrbot.api.message_components import Nodes, Plain, Reply
 from astrbot_plugin_agent_gateway.main import Main
 
 
@@ -49,17 +49,111 @@ class FakeEvent:
 
         return MessageType.FRIEND_MESSAGE
 
+    def get_platform_name(self):
+        return "aiocqhttp"
+
     def is_admin(self):
         return True
 
     async def send(self, chain):
-        self.sent.append("".join(item.text for item in chain.chain))
+        if all(isinstance(item, Plain) for item in chain.chain):
+            self.sent.append("".join(item.text for item in chain.chain))
+        else:
+            self.sent.append(chain)
 
     def should_call_llm(self, enabled):
         assert enabled is False
 
     def stop_event(self):
         self.stopped = True
+
+
+class FakeGroupEvent(FakeEvent):
+    def __init__(self) -> None:
+        super().__init__()
+        self.unified_msg_origin = "aiocqhttp:GroupMessage:763898834"
+        self.is_at_or_wake_command = True
+
+    def get_group_id(self):
+        return "763898834"
+
+    def get_message_type(self):
+        from astrbot.api.platform import MessageType
+
+        return MessageType.GROUP_MESSAGE
+
+    def is_admin(self):
+        return False
+
+
+@pytest.mark.asyncio
+async def test_long_group_reply_uses_paragraph_based_merged_forward(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("AGENT_GATEWAY_ENABLED", "true")
+    context = SimpleNamespace(
+        astrbot_config_mgr=object(),
+        get_config=lambda _umo: {"platform_settings": {"forward_threshold": 500}},
+    )
+    plugin = Main(context)
+    plugin.group_context = None
+    long_reply = (
+        "第一段。" * 70
+        + "\n\n```python\n"
+        + "print('保留完整代码块')\n" * 20
+        + "```\n\n"
+        + "最后一段。" * 80
+    )
+
+    async def handle(_payload):
+        return {
+            "action": "reply",
+            "messages": [{"type": "text", "text": long_reply}],
+        }
+
+    plugin.client = SimpleNamespace(handle=handle, close=lambda: None)
+    event = FakeGroupEvent()
+
+    await plugin.route_to_gateway(event)
+
+    assert len(event.sent) == 1
+    assert isinstance(event.sent[0].chain[0], Nodes)
+    nodes = event.sent[0].chain[0].nodes
+    assert 1 < len(nodes) <= 12
+    assert "".join(node.content[0].text for node in nodes) == long_reply
+    assert any(
+        "```python" in node.content[0].text and "```" in node.content[0].text[9:]
+        for node in nodes
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("length", "expects_forward"), [(499, False), (500, True)])
+async def test_group_forward_threshold_is_inclusive(
+    monkeypatch,
+    length,
+    expects_forward,
+) -> None:
+    monkeypatch.setenv("AGENT_GATEWAY_ENABLED", "true")
+    context = SimpleNamespace(
+        astrbot_config_mgr=object(),
+        get_config=lambda _umo: {"platform_settings": {"forward_threshold": 500}},
+    )
+    plugin = Main(context)
+    plugin.group_context = None
+
+    async def handle(_payload):
+        return {
+            "action": "reply",
+            "messages": [{"type": "text", "text": "长" * length}],
+        }
+
+    plugin.client = SimpleNamespace(handle=handle, close=lambda: None)
+    event = FakeGroupEvent()
+
+    await plugin.route_to_gateway(event)
+
+    assert isinstance(event.sent[0], str) is (not expects_forward)
 
 
 @pytest.mark.asyncio

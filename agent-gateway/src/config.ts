@@ -17,6 +17,7 @@ export type GatewayConfig = {
   routerModel: string;
   routerTimeoutMs: number;
   routerMaxOutputTokens: number;
+  gatewayTimezone: string;
   groupWhitelist: string[];
   contextWindow: number;
   maxOutputTokens: number;
@@ -95,6 +96,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): GatewayConfig {
       256,
       2048,
     ),
+    gatewayTimezone: env.GATEWAY_TIMEZONE?.trim() || "Asia/Shanghai",
     groupWhitelist: groupWhitelist(env),
     contextWindow: boundedNumber(env, "CONTEXT_WINDOW", 16384, 4096, 1000000),
     maxOutputTokens: boundedNumber(

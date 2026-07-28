@@ -8,7 +8,7 @@ from typing import Any
 from astrbot import logger
 from astrbot.api import star
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
-from astrbot.api.message_components import At, Plain, Reply
+from astrbot.api.message_components import At, Node, Nodes, Plain, Reply
 from astrbot.api.platform import MessageType
 from astrbot.builtin_stars.astrbot.group_chat_context import GroupChatContext
 
@@ -258,9 +258,104 @@ class Main(star.Star):
                 if item.get("type") == "text" and item.get("text")
             ]
             if texts:
-                await event.send(MessageChain().message("\n".join(texts)))
+                reply_text = "\n".join(texts)
+                forward_threshold = 500
+                try:
+                    configured_threshold = self.context.get_config(
+                        event.unified_msg_origin
+                    )["platform_settings"]["forward_threshold"]
+                    if int(configured_threshold) > 0:
+                        forward_threshold = int(configured_threshold)
+                except (AttributeError, KeyError, TypeError, ValueError):
+                    pass
+                use_forward = (
+                    message_type == MessageType.GROUP_MESSAGE
+                    and getattr(event, "get_platform_name", lambda: "")() == "aiocqhttp"
+                    and len(reply_text) >= forward_threshold
+                )
+                if use_forward:
+                    nodes = [
+                        Node(
+                            uin=event.get_self_id(),
+                            name="东云bot",
+                            content=[Plain(part)],
+                        )
+                        for part in self._split_forward_text(reply_text)
+                    ]
+                    try:
+                        await event.send(MessageChain(chain=[Nodes(nodes)]))
+                    except Exception as exc:
+                        logger.warning(
+                            "Agent gateway merged forward failed: error_type=%s",
+                            type(exc).__name__,
+                        )
+                        await event.send(MessageChain().message(reply_text))
+                else:
+                    await event.send(MessageChain().message(reply_text))
         event.should_call_llm(False)
         event.stop_event()
+
+    @staticmethod
+    def _split_forward_text(text: str) -> list[str]:
+        """Pack paragraphs into at most twelve merged-forward nodes.
+
+        Fenced code blocks stay intact, while oversized ordinary paragraphs may be
+        split. The returned parts always reproduce the original text exactly.
+
+        Args:
+            text: Complete reply text.
+
+        Returns:
+            Ordered node text parts without truncation.
+        """
+        blocks: list[tuple[str, bool]] = []
+        current: list[str] = []
+        in_fence = False
+        fence_marker = ""
+        block_has_fence = False
+        for line in text.splitlines(keepends=True):
+            stripped = line.lstrip()
+            marker = stripped[:3]
+            if marker in {"```", "~~~"}:
+                if not in_fence:
+                    in_fence = True
+                    fence_marker = marker
+                    block_has_fence = True
+                elif marker == fence_marker:
+                    in_fence = False
+            current.append(line)
+            if not in_fence and not line.strip():
+                blocks.append(("".join(current), block_has_fence))
+                current = []
+                block_has_fence = False
+        if current:
+            blocks.append(("".join(current), block_has_fence))
+        if not blocks:
+            return [text]
+
+        target = max(1000, (len(text) + 11) // 12)
+        while True:
+            chunks: list[str] = []
+            pending = ""
+            for block, has_fence in blocks:
+                pieces = (
+                    [
+                        block[index : index + target]
+                        for index in range(0, len(block), target)
+                    ]
+                    if len(block) > target and not has_fence
+                    else [block]
+                )
+                for piece in pieces:
+                    if pending and len(pending) + len(piece) > target:
+                        chunks.append(pending)
+                        pending = ""
+                    pending += piece
+            if pending:
+                chunks.append(pending)
+            if len(chunks) <= 12:
+                return chunks
+            target = min(len(text), max(target + 1, target * 5 // 4))
 
     @staticmethod
     def _is_admin_command(text: str) -> bool:

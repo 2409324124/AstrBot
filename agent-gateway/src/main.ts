@@ -10,9 +10,11 @@ import { QdrantClient } from "@qdrant/js-client-rest";
 import { createApp } from "./app.ts";
 import { loadConfig } from "./config.ts";
 import { ExaSearchClient } from "./exa.ts";
+import { FrankfurterClient } from "./frankfurter.ts";
 import { GatewayAgent } from "./gateway-agent.ts";
 import { RuntimeIntentRouter } from "./intent-router.ts";
 import { ConversationMemory } from "./memory.ts";
+import { OpenMeteoClient } from "./open-meteo.ts";
 import { PiAgentRuntime } from "./pi-runtime.ts";
 import { HybridRag, OpenAIEmbeddingClient } from "./rag.ts";
 import { SqliteGatewayStore } from "./store.ts";
@@ -111,6 +113,9 @@ export function buildApp(env: NodeJS.ProcessEnv) {
     rag,
     runtime,
     exa: new ExaSearchClient({ apiKey: config.exaApiKey }),
+    openMeteo: new OpenMeteoClient(),
+    frankfurter: new FrankfurterClient(),
+    timezone: config.gatewayTimezone,
     evidenceThreshold: config.ragEvidenceThreshold,
     memory,
     usage: store,

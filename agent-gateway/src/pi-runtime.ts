@@ -6,6 +6,7 @@ export type AgentRunInput = {
   systemPrompt: string;
   prompt: string;
   tools: AgentTool[];
+  requiredTool?: string;
 };
 
 export type AgentRunResult = {
@@ -45,6 +46,7 @@ export class PiAgentRuntime {
   }
 
   async run(input: AgentRunInput): Promise<AgentRunResult> {
+    let providerTurn = 0;
     const agent = new Agent({
       initialState: {
         systemPrompt: input.systemPrompt,
@@ -54,6 +56,24 @@ export class PiAgentRuntime {
       sessionId: input.sessionId,
       streamFn: this.#models.streamSimple.bind(this.#models),
       toolExecution: "sequential",
+      ...(input.requiredTool
+        ? {
+            onPayload: (payload: unknown) => {
+              const firstTurn = providerTurn === 0;
+              providerTurn += 1;
+              if (!firstTurn || !payload || typeof payload !== "object") {
+                return payload;
+              }
+              return {
+                ...payload,
+                tool_choice: {
+                  type: "function",
+                  function: { name: input.requiredTool },
+                },
+              };
+            },
+          }
+        : {}),
     });
     this.#activeAgents.set(input.sessionId, agent);
     const timeout = setTimeout(() => agent.abort(), this.#timeoutMs);

@@ -95,3 +95,21 @@ test("Intent router receives quoted and recent context for elliptical questions"
     /technical tool.*会好用吗.*technical_concept/is,
   );
 });
+
+test("Intent router selects the weather tool for a live forecast question", async () => {
+  const router = new RuntimeIntentRouter({
+    runtime: {
+      run: async () => ({
+        text: '{"route":"external_fact","confidence":0.99,"tool_hint":"get_weather"}',
+        usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: {} }
+      })
+    }
+  });
+
+  assert.deepEqual(await router.classify("今天广州天气怎么样？"), {
+    route: "external_fact",
+    confidence: 0.99,
+    isFallback: false,
+    toolHint: "get_weather"
+  });
+});

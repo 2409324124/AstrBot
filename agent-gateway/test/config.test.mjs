@@ -30,6 +30,7 @@ test("gateway config validates secrets and parses bounded runtime values", () =>
   assert.equal(config.routerModel, "deepseek-v4-pro");
   assert.equal(config.routerTimeoutMs, 30000);
   assert.equal(config.routerMaxOutputTokens, 512);
+  assert.equal(config.gatewayTimezone, "Asia/Shanghai");
   assert.deepEqual(config.groupWhitelist, ["709694410", "89589336"]);
 });
 

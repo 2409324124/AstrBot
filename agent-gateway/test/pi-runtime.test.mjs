@@ -80,6 +80,54 @@ test("Pi runtime executes a tool and returns the follow-up answer", async () => 
   assert.ok(result.usage.output > Math.ceil(result.text.length / 4));
 });
 
+test("Pi runtime requires a named tool only on the first provider turn", async () => {
+  const faux = fauxProvider();
+  const models = createModels();
+  models.setProvider(faux.provider);
+  const payloads = [];
+  faux.setResponses([
+    async (_context, options, _state, model) => {
+      payloads.push(await options?.onPayload?.({ model: model.id, tools: [] }, model));
+      return fauxAssistantMessage(
+        fauxToolCall("get_weather", { location: "广州" }, { id: "tool-weather" }),
+        { stopReason: "toolUse" }
+      );
+    },
+    async (_context, options, _state, model) => {
+      payloads.push(await options?.onPayload?.({ model: model.id, tools: [] }, model));
+      return fauxAssistantMessage("广州当前天气晴朗。");
+    }
+  ]);
+  const runtime = new PiAgentRuntime({
+    models,
+    model: faux.getModel(),
+    timeoutMs: 1000
+  });
+
+  await runtime.run({
+    sessionId: "group:weather",
+    systemPrompt: "查询后回答。",
+    prompt: "今天广州天气怎么样？",
+    requiredTool: "get_weather",
+    tools: [{
+      name: "get_weather",
+      label: "Weather",
+      description: "Get current weather and forecast",
+      parameters: Type.Object({ location: Type.String() }),
+      execute: async () => ({
+        content: [{ type: "text", text: "广州：晴，32°C" }],
+        details: {}
+      })
+    }]
+  });
+
+  assert.deepEqual(payloads[0]?.tool_choice, {
+    type: "function",
+    function: { name: "get_weather" }
+  });
+  assert.equal(payloads[1]?.tool_choice, undefined);
+});
+
 test("Pi runtime switches model without recreating the gateway", async () => {
   const online = fauxProvider({ provider: "online", models: [{ id: "online-a" }] });
   const local = fauxProvider({ provider: "local", models: [{ id: "local-b" }] });

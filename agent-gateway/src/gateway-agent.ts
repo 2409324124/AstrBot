@@ -1,8 +1,5 @@
 import { createHash } from "node:crypto";
 
-import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { Type } from "typebox";
-
 import type {
   GatewayDecision,
   GatewayEvent,
@@ -12,6 +9,12 @@ import type {
 import type { ExaSearchResult } from "./exa.ts";
 import type { AgentRunInput, AgentRunResult } from "./pi-runtime.ts";
 import type { RagHit } from "./rag.ts";
+import { FrankfurterClient } from "./frankfurter.ts";
+import { OpenMeteoClient } from "./open-meteo.ts";
+import {
+  createGatewayTools,
+  type GatewayToolName,
+} from "./tool-registry.ts";
 
 type RagPort = {
   search: (query: string, options: { topK: number }) => Promise<RagHit[]>;
@@ -61,7 +64,8 @@ export type GatewayAuditEntry = {
   fallback?: boolean;
   has_reply_context?: boolean;
   automatic_rag_hits?: number;
-  tool?: "rag_search" | "web_search";
+  tool?: GatewayToolName;
+  tool_status?: "success" | "error";
   result_count?: number;
   action?: "reply" | "no_reply";
   reason_code?: string;
@@ -85,7 +89,17 @@ export type IntentDecision = {
   route: IntentRoute;
   confidence: number;
   isFallback: boolean;
+  toolHint?: ToolHint;
 };
+
+export type ToolHint =
+  | "get_current_time"
+  | "get_weather"
+  | "get_air_quality"
+  | "calculate"
+  | "convert_units"
+  | "convert_currency"
+  | "web_search";
 
 export type IntentRoutingInput = {
   text: string;
@@ -109,6 +123,9 @@ type GatewayAgentOptions = {
   rag: RagPort;
   runtime: RuntimePort;
   exa: ExaPort;
+  openMeteo?: OpenMeteoClient;
+  frankfurter?: FrankfurterClient;
+  timezone?: string;
   evidenceThreshold: number;
   memory?: MemoryPort;
   usage?: UsagePort;
@@ -139,12 +156,13 @@ const FALLBACK_SYSTEM_PROMPT = `你是东云bot。意图路由暂时无法给出
 不要自行添加 AI 内容标记，网关会统一添加。`;
 
 const EXTERNAL_SYSTEM_PROMPT = `你是东云bot。这个问题依赖当前外部事实。
-回答事实前必须调用网页搜索，并在答案中保留可核验的来源 URL。
+回答事实前必须调用匹配的实时信息工具；天气、空气质量和汇率优先使用专用工具，其他事实调用网页搜索。
+使用网页搜索时在答案中保留可核验的来源 URL。
 如果搜索失败或来源不足，明确说明尚未核验，不要用本地知识库替代当前事实。
 不要自行添加 AI 内容标记，网关会统一添加。`;
 
 const LOCAL_RUNTIME_SYSTEM_PROMPT = `你是东云bot。这个问题询问当前部署的实时状态。
-本轮没有自动注入实时配置或日志；只能使用对话中已经明确提供的状态。
+本轮没有自动注入实时配置或日志；当前日期时间可调用 get_current_time，其他状态只能使用对话中已经明确提供的信息。
 证据不足时直接说明无法核验，不要把历史文档或一般知识伪装成实时状态。
 不要自行添加 AI 内容标记，网关会统一添加。`;
 
@@ -180,6 +198,9 @@ export class GatewayAgent {
   readonly #rag: RagPort;
   readonly #runtime: RuntimePort;
   readonly #exa: ExaPort;
+  readonly #openMeteo: OpenMeteoClient;
+  readonly #frankfurter: FrankfurterClient;
+  readonly #timezone: string;
   readonly #evidenceThreshold: number;
   readonly #memory: MemoryPort | undefined;
   readonly #usage: UsagePort | undefined;
@@ -193,6 +214,9 @@ export class GatewayAgent {
     this.#rag = options.rag;
     this.#runtime = options.runtime;
     this.#exa = options.exa;
+    this.#openMeteo = options.openMeteo ?? new OpenMeteoClient();
+    this.#frankfurter = options.frankfurter ?? new FrankfurterClient();
+    this.#timezone = options.timezone ?? "Asia/Shanghai";
     this.#evidenceThreshold = options.evidenceThreshold;
     this.#memory = options.memory;
     this.#usage = options.usage;
@@ -376,86 +400,29 @@ export class GatewayAgent {
       automatic_rag_hits: evidence.length,
       duration_ms: Date.now() - startedAt,
     });
-    const ragParameters = Type.Object({
-      query: Type.String({ minLength: 1 }),
-      top_k: Type.Optional(Type.Integer({ minimum: 1, maximum: 24 })),
-    });
-    const ragTool: AgentTool<typeof ragParameters, { hitCount: number }> = {
-      name: "rag_search",
-      label: "RAG Search",
-      description: "Search the local persistent knowledge base",
-      parameters: ragParameters,
-      execute: async (_toolCallId, params) => {
-        const toolStartedAt = Date.now();
-        const hits = await this.#rag.search(params.query, {
-          topK: params.top_k ?? 16,
-        });
+    const successfulTools = new Set<GatewayToolName>();
+    const tools = createGatewayTools({
+      rag: this.#rag,
+      exa: this.#exa,
+      openMeteo: this.#openMeteo,
+      frankfurter: this.#frankfurter,
+      timezone: this.#timezone,
+      onToolCall: (entry) => {
+        if (entry.status === "success") {
+          successfulTools.add(entry.tool);
+        }
         this.#audit?.record({
           event: "gateway_tool",
           session_ref: sessionRef,
-          tool: "rag_search",
-          result_count: hits.length,
-          duration_ms: Date.now() - toolStartedAt,
+          tool: entry.tool,
+          tool_status: entry.status,
+          ...(entry.resultCount === undefined
+            ? {}
+            : { result_count: entry.resultCount }),
+          duration_ms: entry.durationMs,
         });
-        const toolEvidence = hits
-          .map(
-            (hit, index) =>
-              `[${index + 1}] ${hit.text}\n来源: ${hit.source}`,
-          )
-          .join("\n\n");
-        return {
-          content: [
-            {
-              type: "text",
-              text: head(toolEvidence, 6000),
-            },
-          ],
-          details: { hitCount: hits.length },
-        };
       },
-    };
-    const webParameters = Type.Object({
-      query: Type.String({ minLength: 1 }),
-      domains: Type.Optional(
-        Type.Array(Type.String({ minLength: 1 }), { maxItems: 8 }),
-      ),
-      max_results: Type.Optional(Type.Integer({ minimum: 1, maximum: 8 })),
     });
-    const webTool: AgentTool<typeof webParameters, { resultCount: number }> = {
-      name: "web_search",
-      label: "Web Search",
-      description:
-        "Search current web information. Use domains=['x.com'] for X/Twitter.",
-      parameters: webParameters,
-      execute: async (_toolCallId, params) => {
-        const toolStartedAt = Date.now();
-        const results = await this.#exa.search(params.query, {
-          ...(params.domains ? { domains: params.domains } : {}),
-          maxResults: params.max_results ?? 5,
-        });
-        this.#audit?.record({
-          event: "gateway_tool",
-          session_ref: sessionRef,
-          tool: "web_search",
-          result_count: results.length,
-          duration_ms: Date.now() - toolStartedAt,
-        });
-        return {
-          content: [
-            {
-              type: "text",
-              text: results
-                .map(
-                  (result, index) =>
-                    `[${index + 1}] ${result.title}\n${result.url}\n${result.text}`,
-                )
-                .join("\n\n"),
-            },
-          ],
-          details: { resultCount: results.length },
-        };
-      },
-    };
     const evidenceBlock = forcedWebResults.length
       ? forcedWebResults
           .map(
@@ -509,15 +476,6 @@ export class GatewayAgent {
     const prompt = [boundedMemory, boundedEvidence, questionBlock]
       .filter(Boolean)
       .join("\n\n");
-    const tools = intent.isFallback
-      ? [ragTool, webTool]
-      : intent.route === "chat_creative"
-        ? []
-        : intent.route === "external_fact"
-          ? [webTool]
-          : intent.route === "technical_concept"
-            ? [ragTool, webTool]
-            : [ragTool];
     const baseSystemPrompt = intent.isFallback
       ? FALLBACK_SYSTEM_PROMPT
       : isCasualChat
@@ -529,11 +487,16 @@ export class GatewayAgent {
             : intent.route === "technical_concept"
               ? TECHNICAL_SYSTEM_PROMPT
               : SYSTEM_PROMPT;
+    const requiredTool = event.force_route
+      ? undefined
+      : intent.toolHint ??
+        (intent.route === "external_fact" ? "web_search" : undefined);
     const result = await this.#runtime.run({
       sessionId: event.umo,
       systemPrompt: `${baseSystemPrompt}\n你无法创建定时任务或提醒，不得声称已经创建、安排或将在未来主动执行。`,
       prompt,
       tools,
+      ...(requiredTool ? { requiredTool } : {}),
     });
     if ((this.#sessionGenerations.get(event.umo) ?? 0) !== generation) {
       recordReplyAudit("no_reply", "session_stopped");
@@ -555,10 +518,23 @@ export class GatewayAgent {
           .map((hit) => hit.source),
       ),
     ];
-    const citedText =
+    let citedText =
       sources.length > 0 && !text.includes("本地来源：")
         ? `${text}\n本地来源：${sources.join("、")}`
         : text;
+    if (
+      (successfulTools.has("get_weather") ||
+        successfulTools.has("get_air_quality")) &&
+      !citedText.includes("https://open-meteo.com/")
+    ) {
+      citedText += "\n数据来源：https://open-meteo.com/";
+    }
+    if (
+      successfulTools.has("convert_currency") &&
+      !citedText.includes("https://frankfurter.dev/")
+    ) {
+      citedText += "\n汇率来源：https://frankfurter.dev/（参考汇率）";
+    }
     recordReplyAudit("reply", "agent_reply");
     return {
       action: "reply",

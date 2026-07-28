@@ -3,6 +3,17 @@ import test from "node:test";
 
 import { GatewayAgent } from "../src/gateway-agent.ts";
 
+const ALL_TOOL_NAMES = [
+  "rag_search",
+  "web_search",
+  "get_current_time",
+  "get_weather",
+  "get_air_quality",
+  "calculate",
+  "convert_units",
+  "convert_currency"
+];
+
 function fixedRouter(route = "local_knowledge") {
   return {
     classify: async () => ({ route, confidence: 0.99, isFallback: false })
@@ -63,7 +74,7 @@ test("Gateway agent answers casual dining chat without consulting local RAG", as
 
   assert.deepEqual(order, ["route", "llm"]);
   assert.doesNotMatch(runInput.prompt, /本地证据|2021_clip/);
-  assert.equal(runInput.tools.length, 0);
+  assert.deepEqual(runInput.tools.map((tool) => tool.name), ALL_TOOL_NAMES);
   assert.match(runInput.systemPrompt, /无法创建定时任务或提醒/);
   assert.equal(decision.messages[0].text, "食个焗猪扒饭啦。\n（ai生成内容）");
 });
@@ -130,10 +141,7 @@ test("Gateway agent resolves an elliptical question from quoted context", async 
   assert.match(runInput.prompt, /\[引用消息\]\n直接接 Pi 这个轮子/);
   assert.match(runInput.prompt, /\[用户问题\]\n会好用吗/);
   assert.match(runInput.systemPrompt, /不要仅以.*知识库.*没有/);
-  assert.deepEqual(
-    runInput.tools.map((tool) => tool.name),
-    ["rag_search", "web_search"],
-  );
+  assert.deepEqual(runInput.tools.map((tool) => tool.name), ALL_TOOL_NAMES);
   assert.equal(decision.action, "reply");
 });
 
@@ -237,7 +245,7 @@ test("Gateway agent fallback keeps tools available without injecting automatic R
 
   assert.equal(ragCalls, 0);
   assert.doesNotMatch(runInput.prompt, /本地证据/);
-  assert.deepEqual(runInput.tools.map((tool) => tool.name), ["rag_search", "web_search"]);
+  assert.deepEqual(runInput.tools.map((tool) => tool.name), ALL_TOOL_NAMES);
 });
 
 test("Gateway agent routes current external facts to web search without local RAG", async () => {
@@ -286,9 +294,65 @@ test("Gateway agent routes current external facts to web search without local RA
   });
 
   assert.equal(ragCalls, 0);
-  assert.deepEqual(runInput.tools.map((tool) => tool.name), ["web_search"]);
+  assert.deepEqual(runInput.tools.map((tool) => tool.name), ALL_TOOL_NAMES);
+  assert.equal(runInput.requiredTool, "web_search");
   assert.doesNotMatch(runInput.systemPrompt, /已经执行了本地知识检索/);
   assert.match(runInput.systemPrompt, /网页搜索/);
+});
+
+test("Gateway agent exposes every tool and requires the routed weather tool", async () => {
+  let runInput;
+  const agent = new GatewayAgent({
+    router: {
+      classify: async () => ({
+        route: "external_fact",
+        confidence: 0.99,
+        isFallback: false,
+        toolHint: "get_weather"
+      })
+    },
+    rag: { search: async () => [] },
+    exa: { search: async () => [] },
+    openMeteo: {
+      weather: async () => ({ condition: "大致晴朗" }),
+      airQuality: async () => ({ usAqi: 50 })
+    },
+    runtime: {
+      run: async (input) => {
+        runInput = input;
+        const weather = input.tools.find((tool) => tool.name === "get_weather");
+        await weather.execute(
+          "weather-1",
+          { location: "广州", forecast_days: 7 },
+          new AbortController().signal
+        );
+        return {
+          text: "广州今天大致晴朗。",
+          usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: {} }
+        };
+      }
+    },
+    evidenceThreshold: 0.03
+  });
+
+  const decision = await agent.handle({
+    schema_version: "1",
+    message_id: "weather-route-1",
+    umo: "group:weather",
+    chat_type: "group",
+    group_id: "763898834",
+    sender_id: "member",
+    self_id: "bot-account",
+    text: "广州未来七天天气如何？",
+    mentions: [],
+    timestamp: 1784860800000,
+    is_admin: false,
+    owner_takeover_active: false
+  });
+
+  assert.deepEqual(runInput.tools.map((tool) => tool.name), ALL_TOOL_NAMES);
+  assert.equal(runInput.requiredTool, "get_weather");
+  assert.match(decision.messages[0].text, /https:\/\/open-meteo\.com\//);
 });
 
 test("explicit research bypasses intent classification and forces web search", async () => {
@@ -346,8 +410,9 @@ test("explicit research bypasses intent classification and forces web search", a
 
   assert.equal(routerCalls, 0);
   assert.equal(webCalls, 1);
-  assert.deepEqual(runInput.tools.map((tool) => tool.name), ["web_search"]);
-  assert.match(runInput.systemPrompt, /必须调用网页搜索/);
+  assert.deepEqual(runInput.tools.map((tool) => tool.name), ALL_TOOL_NAMES);
+  assert.equal(runInput.requiredTool, undefined);
+  assert.match(runInput.systemPrompt, /必须调用匹配的实时信息工具/);
   assert.match(runInput.prompt, /https:\/\/example\.gov\.cn\/rules/);
 });
 
@@ -390,7 +455,7 @@ test("Gateway agent does not present stored documents as live runtime state", as
   });
 
   assert.equal(ragCalls, 0);
-  assert.deepEqual(runInput.tools.map((tool) => tool.name), ["rag_search"]);
+  assert.deepEqual(runInput.tools.map((tool) => tool.name), ALL_TOOL_NAMES);
   assert.doesNotMatch(runInput.systemPrompt, /已经执行了本地知识检索/);
   assert.match(runInput.systemPrompt, /实时状态/);
 });
