@@ -374,3 +374,27 @@
 - 生产鉴权烟测不调用模型：白名单群 `stats` 返回 200，非管理员私聊返回 403；`session_usage` 持久表存在。AstrBot 容器插件回归 19/19 通过。
 - 已应用可逆安全配置：`add_cron_tools=False`、`cron_jobs=0`，恢复状态保存在 `rag-stack/runtime/agent-safety-backup.json`。
 - 常规 Gateway 构建只在拉取 Docker Hub Node 元数据时超时；因依赖锁未变化，改从已验证镜像离线覆盖本次 `src/` 并成功部署。首次 AstrBot Compose 命令缺少 env 文件而在插值阶段停止，补充 `--env-file rag-stack/.env` 后成功。
+
+## 2026-07-29：QQ 登录态掉线诊断与 WebUI 代理
+
+- **状态：** in_progress
+- 用户确认 QQ 客户端显示该 Linux QQ 登录设备离线，要求确认缓存、是否需要重新扫码，并建议把远端 WebUI 代理到本地。
+- 只读确认 NapCat 与 QQ 进程均运行、容器重启次数为零；NapCat 到 AstrBot 的 OneBot TCP 连接为 established。
+- QQ 配置目录约 1.8GB并持续有新写入，说明持久缓存存在；未复制或下载该目录。
+- 通过 NapCat WebUI 鉴权接口只读取脱敏状态：NapCat 自报已登录、无二维码、无登录错误。该状态与用户侧设备离线冲突，当前按上游会话陈旧处理，不把它误判为 AstrBot/Gateway 故障。
+- SSH 本地转发被服务端策略拒绝；失败隧道不再重试。下一步改用仅绑定 Tailscale 地址的临时 TCP 代理。
+- QQLogin 动作接口首次按 GET 访问返回 404，未产生状态变更；按实际 POST 契约重试后确认有 1 个与当前账号匹配的可快速登录缓存。
+- 首个第二 SSH 会话未分配本地 PTY，不能保持代理前台进程；未修改远端。重新以 PTY 建连后代理启动成功。
+- 临时代理仅监听远端 Tailscale 地址的 16099 端口，转发到本机回环的 NapCat WebUI；本机访问得到 301 并正确跳转 `/webui`。
+- 一次宽泛 NapCat 日志筛选带出无关消息内容；没有保存到规划文件，后续只查询聚合状态与计数。
+- 按最小恢复路径仅重启 NapCat；AstrBot、Gateway 与 Qdrant 保持原运行时长。
+- NapCat 重启后旧 WebUI Bearer 正常失效；重新内部鉴权后确认 `is_login=false`、快速登录缓存仍为 1 项，错误为二维码已过期。
+- 经代理下载完整 WebUI JS 首次超时；改在远端容器内只检索 QQ 管理静态资源，确认二维码刷新与读取接口契约。
+- 已调用官方接口刷新二维码；临时登录 URL仅经 SSH 复制到本机 `/tmp`，使用本机离线二维码库生成 450×450 PNG，没有交给第三方服务。
+- 用户成功登录 WebUI 后，QQ 状态同步恢复为 `is_login=true`、`online=true`，无二维码和登录错误；NapCat 内存在已建立 TCP 连接。
+- 尚需用户在真实白名单群发送一条唤醒消息，验证消息进入与 Bot 回复后关闭临时代理并完成阶段。
+# 2026-07-29：AstrBot 可验证部署与掉线恢复工作流
+
+- 用户批准实施完整计划，并锁定 Coogen“E3 后公开 + 无密钥夹具/真实远端双层验证”。
+- 已恢复规划文件、检查工作树与仓库指令；保留既有未提交规划文档和 `AGENT_HANDOFF.md`。
+- 已审计健康检查、启动、备份、恢复、Compose 与 NapCat WebUI 鉴权代码；开始按纵向 TDD 切片实现统一验证 CLI。

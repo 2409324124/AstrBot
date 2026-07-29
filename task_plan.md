@@ -6,7 +6,7 @@
 
 ## 当前阶段
 
-阶段 14：让 `/new` 与 `/reset` 清理 Agent Gateway 会话
+阶段 16：AstrBot 可验证部署与掉线恢复工作流
 
 ## 各阶段
 
@@ -157,6 +157,28 @@
 - [ ] 真实 QQ 验证清空后下一轮不携带旧记忆
 - **状态：** in_progress
 
+### 阶段 15：QQ 登录态掉线诊断与恢复
+
+- [x] 只读确认 NapCat、QQ 进程与 OneBot 反向 WebSocket 状态
+- [x] 确认 QQ 配置/缓存目录持久化，并通过 WebUI API读取脱敏登录状态
+- [x] 验证当前账号是否存在可用的快速登录缓存
+- [x] 通过仅绑定 Tailscale 地址的临时代理开放 NapCat WebUI
+- [x] 根据证据选择最小恢复路径：缓存快速登录失败，需刷新二维码后重新扫码
+- [ ] QQ 已恢复在线；等待用户真实群消息验证进入与 Bot 回复
+- **状态：** in_progress
+
+### 阶段 16：AstrBot 可验证部署与掉线恢复工作流
+
+- [ ] RED→GREEN：统一验证 CLI 能识别完整健康、QQ 幽灵在线与基础服务故障
+- [ ] RED→GREEN：最小化 NapCat 恢复只重启目标服务，并安全降级到扫码
+- [ ] RED→GREEN：临时扫码代理只绑定 Tailscale 地址并按 TTL 自动关闭
+- [ ] RED→GREEN：备份清单完整性验证和 NapCat 配置备份
+- [ ] 收紧 Compose 镜像与监听配置，更新运维文档
+- [ ] 建立不含密钥的 Coogen 验证夹具与脱敏发布草案
+- [ ] 运行目标测试、静态检查、Compose 检查与秘密扫描
+- [ ] Coogen 官方插件兼容性门禁；E3 配对与 Promote 等待用户分别批准
+- **状态：** in_progress
+
 ## 已做决策
 
 | 决策 | 理由 |
@@ -182,6 +204,8 @@
 | Gateway 切流期间由 Gateway 实现 `/new`、`/reset` | AstrBot 内置会话与 Gateway SQLite 已是两套状态；只清 AstrBot 会造成“命令成功但历史仍在”。 |
 | 群会话控制权限覆盖全部 Gateway 白名单成员 | 用户已明确选择；白名单外群在 Gateway 前置拒绝，私聊仍只允许管理员。 |
 | 定时任务能力关闭 | 用户明确不需要；移除 Agent 工具暴露并关闭 AstrBot `add_cron_tools`，避免未授权任务和 token 消耗。 |
+| QQ 掉线先检查缓存与运行态，再决定是否扫码 | 当前进程、OneBot 链路和 NapCat 自报状态不能代表 QQ 上游会话仍有效；贸然刷新二维码可能破坏可复用登录态。 |
+| 临时 WebUI 代理只绑定 Tailscale 地址 | SSH 服务端禁用 TCP forwarding；不修改 sshd，也不把管理面暴露到公网。 |
 
 ## 已知风险与错误
 
@@ -230,6 +254,11 @@
 | 首次生产配置探针猜测了多余的 `config/` 目录 | 1 | 只读失败、未修改；按容器实际目录改读 `/AstrBot/data/cmd_config.json`。 |
 | Gateway 常规构建获取 Docker Hub Node 元数据超时 | 1 | package 与 lockfile 未变；从已验证旧镜像仅覆盖 `src/`，以 `--network=none` 完成可审计的增量镜像。 |
 | 首次重建 AstrBot 未传 RAG env 文件 | 1 | Compose 在插值阶段停止，旧容器未变；增加 `--env-file rag-stack/.env` 后只重建 AstrBot。 |
+| SSH 本地端口转发被服务端策略禁止 | 1 | 终止失败隧道；改用只绑定远端 Tailscale 地址的临时代理，不修改 SSH 服务配置。 |
+| NapCat 宽泛日志筛选带出无关聊天正文 | 1 | 不保存正文；后续只读取聚合状态、时间戳和错误计数，不再输出原始消息日志。 |
+| 首次用 GET 请求 QQLogin 动作接口返回 404 | 1 | 未修改登录态；按 WebUI 实际契约改用 POST 后只读取脱敏字段成功。 |
+| 首个第二 SSH 会话未分配本地 PTY，stdin 已关闭 | 1 | 未启动代理；重新以 PTY 模式建立会话后启动成功。 |
+| 经 Tailscale 代理下载完整 WebUI JS 超时 | 1 | 未取得接口片段；改在远端容器内只检索目标静态资源，确认官方二维码接口。 |
 
 ## 备注
 

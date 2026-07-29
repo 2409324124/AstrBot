@@ -232,3 +232,23 @@
 - 生产部署后 `add_cron_tools=False` 且 `cron_jobs=0`；Gateway 不暴露 cron/reminder 工具，系统提示也明确禁止声称已创建定时任务。
 - 生产控制 API 的实际权限边界符合契约：Gateway 白名单群可读取本群 stats，非管理员私聊在进入控制器前返回 403；两条探针均未进入路由、RAG、Web 或 LLM。
 - 本阶段只重建 AstrBot 与 Gateway。NapCat、BGE-M3 Embedding、Qdrant 保持原启动时间，避免 QQ 登录和现有向量库受到影响。
+
+## 2026-07-29 QQ 登录态掉线诊断
+
+- NapCat 容器、Linux QQ 进程均持续运行且重启次数为零；NapCat 到 AstrBot 的 OneBot 反向 WebSocket 当前为已建立状态。因此故障不在 AstrBot/Gateway 路由，也不是容器退出。
+- QQ 配置目录与 NapCat 配置目录均通过宿主机目录持久化；QQ 目录约 1.8GB，且当天仍有写入，说明本地缓存存在并被使用，但缓存存在不等于上游会话仍有效。
+- NapCat WebUI 的脱敏状态接口返回 `isLogin=true`，没有二维码或登录错误；用户侧 Linux QQ 设备状态却显示离线。两者冲突，当前单一假设是 QQ 上游会话已失效或卡在幽灵在线状态，而 NapCat 本地状态尚未收敛。
+- OneBot WebSocket 建连只证明 NapCat 与 AstrBot 之间的本地传输正常，不能证明 QQ 账号仍在线。
+- 下一项判别证据是快速登录列表是否包含当前账号。若存在，优先通过受控 NapCat 重启复用缓存；若重启后 WebUI 明确要求登录或出现二维码，再由用户扫码。
+- 快速登录接口返回 1 个缓存项，标记为可快速登录，且与当前 QQ 进程账号匹配；当前登录信息接口仍自报在线。缓存具备优先尝试条件，但是否仍被 QQ 服务端接受只能通过受控重新登录验证。
+- 仅重启 NapCat 后，本地幽灵在线状态被清除；重新鉴权后的接口返回未登录，并明确报告二维码已过期。快速登录缓存仍有 1 项，但未被 QQ 服务端接受，因此本次需要刷新二维码并由用户重新扫码。
+- NapCat 前端实际使用 `RefreshQRcode` 与 `GetQQLoginQrcode`；返回值是临时登录 URL，不是 PNG。已在本机离线编码为二维码，未把 WebUI Token 或临时登录 URL输出到聊天或第三方服务。
+- 用户登录 WebUI 后，NapCat 登录状态转为 `isLogin=true`、`online=true`，账号信息存在且不再报告二维码或登录错误；再次刷新二维码被拒绝是因为已经登录。NapCat 网络命名空间同时存在已建立 TCP 连接。
+- SSH 服务端明确禁止 TCP forwarding。WebUI 代理应只绑定远端 Tailscale 地址并临时运行，不修改 sshd、不监听公网地址。
+# 2026-07-29：AstrBot 可验证部署与掉线恢复工作流
+
+- 现有 `healthcheck.sh` 只验证 Qdrant、Embedding 健康与 1024 维有限向量，无法识别 AstrBot、Gateway、OneBot 或 QQ 上游掉线。
+- NapCat WebUI 的现有鉴权实现可复用：读取 `webui.json` token，计算 `sha256(token + ".napcat")`，登录后用返回的 Credential 访问 API。
+- 现有 `restore.sh` 仅检查 `manifest.json` 是否存在，停止服务前没有校验文件大小、SHA256、缺失项或额外项。
+- 当前 Compose 已固定 Qdrant 与 TEI 标签；AstrBot build 基础镜像仍默认 `latest`，生产基底应改为显式配置且无默认浮动标签。
+- Coogen 官方插件仓库当前不可公开拉取，官方安装指令中的 `openclaw hooks add` 与本机 OpenClaw 2026.7.1-2 不兼容；这些是 E3 外部接入的硬门禁，不影响本地工作流实现。
