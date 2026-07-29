@@ -1,0 +1,19 @@
+{
+  "qdrant": {"reachable": true},
+  "embedding": {"healthy": true, "dimension": 1024, "finite": true},
+  "gateway": {"healthy": true, "ready": true},
+  "astrbot": {
+    "reachable": true,
+    "platforms": [
+      {"type": "qq_napcat", "status": "running", "error_count": 0}
+    ]
+  },
+  "napcat": {"isLogin": true, "online": false, "accountPresent": true},
+  "listeners": [
+    {"port": 6099, "address": "127.0.0.1"},
+    {"port": 6185, "address": "127.0.0.1"},
+    {"port": 6333, "address": "127.0.0.1"},
+    {"port": 8000, "address": "127.0.0.1"},
+    {"port": 8090, "address": "127.0.0.1"}
+  ]
+}

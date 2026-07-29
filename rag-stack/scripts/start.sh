@@ -14,6 +14,7 @@ rag_compose up -d
 
 if [[ "${1:-}" == "--with-astrbot" ]]; then
   astrbot_compose up -d astrbot napcat
+  ASTRBOT_HEALTHCHECK_MODE=full "${SCRIPT_DIR}/healthcheck.sh"
+else
+  ASTRBOT_HEALTHCHECK_MODE=core "${SCRIPT_DIR}/healthcheck.sh"
 fi
-
-"${SCRIPT_DIR}/healthcheck.sh"

@@ -398,3 +398,7 @@
 - 用户批准实施完整计划，并锁定 Coogen“E3 后公开 + 无密钥夹具/真实远端双层验证”。
 - 已恢复规划文件、检查工作树与仓库指令；保留既有未提交规划文档和 `AGENT_HANDOFF.md`。
 - 已审计健康检查、启动、备份、恢复、Compose 与 NapCat WebUI 鉴权代码；开始按纵向 TDD 切片实现统一验证 CLI。
+- RED→GREEN：统一 CLI 的夹具与真实 HTTP 路径可验证 Qdrant、Embedding、Gateway、AstrBot、OneBot、QQ 上游和监听安全；幽灵在线返回 20，6199 主机发布返回 22。
+- RED→GREEN：恢复夹具证明只有 NapCat 可改变；生产路径快照五个容器、只执行 `restart napcat` 并在恢复后再次比对。
+- RED→GREEN：临时代理拒绝非 Tailscale 绑定；备份恢复在停服务前精确验证文件集合、大小与 SHA256，NapCat 配置默认备份而 QQ 会话缓存保持显式可选。
+- 用户要求停止继续修改 AstrBot，优先解决 Coogen `hooks add` 与 OpenClaw 2026.7.1-2 的兼容问题。本阶段本地半成品将单独 checkpoint；未部署、未重启、未修改远端 AstrBot。

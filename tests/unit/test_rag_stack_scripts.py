@@ -1,5 +1,7 @@
+import hashlib
 import importlib.util
 import json
+import os
 import sqlite3
 import subprocess
 import sys
@@ -181,6 +183,25 @@ def test_embedding_uses_registered_nvidia_runtime_instead_of_cdi_hook() -> None:
     assert "gpus: all" not in compose
 
 
+def test_healthcheck_uses_the_full_runtime_verifier() -> None:
+    """The shell entrypoint must not stop at Qdrant and embedding checks."""
+    script = (RAG_SCRIPTS / "healthcheck.sh").read_text(encoding="utf-8")
+
+    assert "astrbot_ops.py" in script
+    assert 'verify --mode "${ASTRBOT_HEALTHCHECK_MODE:-full}"' in script
+    assert "EMBEDDING_RESPONSE" not in script
+
+
+def test_start_verifies_only_the_services_it_was_asked_to_start() -> None:
+    script = (RAG_SCRIPTS / "start.sh").read_text(encoding="utf-8")
+
+    assert "ASTRBOT_HEALTHCHECK_MODE=core" in script
+    assert "ASTRBOT_HEALTHCHECK_MODE=full" in script
+    assert script.index("astrbot_compose up -d astrbot napcat") < script.index(
+        "ASTRBOT_HEALTHCHECK_MODE=full"
+    )
+
+
 def test_astrbot_override_mounts_host_worktree_for_local_code_changes() -> None:
     override = (RAG_SCRIPTS.parent / "astrbot.override.yml").read_text(
         encoding="utf-8",
@@ -197,6 +218,19 @@ def test_astrbot_override_resets_incompatible_no_new_privileges_setting() -> Non
     )
 
     assert "security_opt: !reset []" in override
+
+
+def test_compose_uses_pinned_images_and_private_management_ports() -> None:
+    base = (RAG_SCRIPTS.parents[1] / "compose.yml").read_text(encoding="utf-8")
+    override = (RAG_SCRIPTS.parent / "astrbot.override.yml").read_text(
+        encoding="utf-8",
+    )
+
+    assert ":latest" not in base
+    assert ":latest" not in override
+    assert '"127.0.0.1:6185:6185"' in base
+    assert "6199:6199" not in base
+    assert "restart: unless-stopped" in base
 
 
 def test_group_persona_prompt_is_additive_and_idempotent() -> None:
@@ -544,3 +578,98 @@ def test_history_cpu_import_requires_a_complete_backup(tmp_path) -> None:
     assert manifest["created_at"] == "20260714T082441Z"
     with pytest.raises(RuntimeError, match="backup manifest"):
         module.validate_backup_dir(tmp_path / "missing")
+
+
+def test_backup_validator_rejects_corruption_and_untracked_files(tmp_path) -> None:
+    """Restore input must match the manifest exactly before services stop."""
+    backup = tmp_path / "backup"
+    backup.mkdir()
+    data = backup / "knowledge_base" / "doc.db"
+    data.parent.mkdir()
+    data.write_bytes(b"consistent-backup")
+    digest = hashlib.sha256(data.read_bytes()).hexdigest()
+    (backup / "manifest.json").write_text(
+        json.dumps(
+            {
+                "created_at": "20260729T000000Z",
+                "files": [
+                    {
+                        "path": "knowledge_base/doc.db",
+                        "size": data.stat().st_size,
+                        "sha256": digest,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    command = [
+        sys.executable,
+        str(RAG_SCRIPTS / "validate_backup.py"),
+        str(backup),
+    ]
+
+    valid = subprocess.run(command, check=False, capture_output=True, text=True)
+
+    assert valid.returncode == 0, valid.stderr
+    assert json.loads(valid.stdout) == {"status": "ok", "files": 1}
+
+    (backup / "unexpected.txt").write_text("not tracked", encoding="utf-8")
+    invalid = subprocess.run(command, check=False, capture_output=True, text=True)
+
+    assert invalid.returncode == 1
+    assert json.loads(invalid.stdout)["reason_code"] == "manifest_mismatch"
+
+
+def test_restore_validates_the_manifest_before_stopping_services() -> None:
+    """No rollback or container stop may occur before integrity validation."""
+    script = (RAG_SCRIPTS / "restore.sh").read_text(encoding="utf-8")
+
+    validator = script.index("validate_backup.py")
+    rollback = script.index('"${SCRIPT_DIR}/rollback.sh"')
+    stop = script.index("astrbot_compose stop astrbot")
+    assert validator < rollback < stop
+
+
+def test_backup_includes_napcat_config_but_not_session_by_default(tmp_path) -> None:
+    """Small control-plane config is backed up; the large QQ cache is opt-in."""
+    data_root = tmp_path / "rag-data"
+    knowledge_root = tmp_path / "astrbot-data" / "knowledge_base"
+    knowledge_root.mkdir(parents=True)
+    napcat_config = tmp_path / "napcat-config"
+    napcat_config.mkdir()
+    (napcat_config / "webui.json").write_text(
+        '{"token":"private-test-value"}',
+        encoding="utf-8",
+    )
+    napcat_session = tmp_path / "qq-session"
+    napcat_session.mkdir()
+    (napcat_session / "large-cache.bin").write_bytes(b"cache")
+    output = tmp_path / "backup"
+    env = {
+        **os.environ,
+        "RAG_DATA_ROOT": str(data_root),
+        "ASTRBOT_KB_ROOT": str(knowledge_root),
+        "NAPCAT_CONFIG_ROOT": str(napcat_config),
+        "NAPCAT_SESSION_ROOT": str(napcat_session),
+    }
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(RAG_SCRIPTS / "backup_state.py"),
+            "--skip-qdrant",
+            "--output",
+            str(output),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (output / "napcat_config" / "webui.json").is_file()
+    assert not (output / "napcat_session").exists()
+    manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["napcat_session_included"] is False

@@ -10,7 +10,7 @@ services:
       dockerfile: rag-stack/Dockerfile.astrbot
       network: host
       args:
-        ASTRBOT_BASE_IMAGE: ${ASTRBOT_BASE_IMAGE:-soulter/astrbot:latest}
+        ASTRBOT_BASE_IMAGE: ${ASTRBOT_BASE_IMAGE:?ASTRBOT_BASE_IMAGE must be pinned}
         HTTPS_PROXY: ${RAG_BUILD_PROXY:-}
         HTTP_PROXY: ${RAG_BUILD_PROXY:-}
     environment:

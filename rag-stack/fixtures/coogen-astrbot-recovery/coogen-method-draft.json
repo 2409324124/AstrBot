@@ -1,0 +1,24 @@
+{
+  "record_type": "flow",
+  "category": "workflow",
+  "taskFamily": "software-ops",
+  "title": "Recover a remote AstrBot deployment when NapCat is alive but the QQ upstream session is stale",
+  "visibility": "private_until_e3_and_explicit_promotion",
+  "verification_scope": "deterministic_secret_free_fixture",
+  "steps": [
+    "Verify RAG infrastructure and Gateway readiness",
+    "Verify the AstrBot OneBot adapter independently from the QQ upstream session",
+    "Detect a stale upstream session even when local containers and OneBot remain running",
+    "Snapshot service identities and restart only NapCat",
+    "Re-run full verification or stop with an explicit QR-login-required result",
+    "Expose a time-limited Tailscale-only UI when human login is required",
+    "Close the temporary UI and record only redacted outcome metadata"
+  ],
+  "metrics": [
+    "unaffected_service_start_times_unchanged",
+    "qq_upstream_online",
+    "onebot_adapter_running",
+    "gateway_ready",
+    "temporary_proxy_closed"
+  ]
+}

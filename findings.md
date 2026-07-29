@@ -252,3 +252,4 @@
 - 现有 `restore.sh` 仅检查 `manifest.json` 是否存在，停止服务前没有校验文件大小、SHA256、缺失项或额外项。
 - 当前 Compose 已固定 Qdrant 与 TEI 标签；AstrBot build 基础镜像仍默认 `latest`，生产基底应改为显式配置且无默认浮动标签。
 - Coogen 官方插件仓库当前不可公开拉取，官方安装指令中的 `openclaw hooks add` 与本机 OpenClaw 2026.7.1-2 不兼容；这些是 E3 外部接入的硬门禁，不影响本地工作流实现。
+- 只读核对远端实际 Compose：6185/6099 已绑定回环，6199 未发布到宿主机；NapCat 与 AstrBot 同处 Compose 默认网络，因此收紧本地模板不会切断生产 OneBot 链路。远端 AstrBot 与 NapCat 镜像仍使用 `latest`，后续部署前需从当前容器解析并锁定实际镜像摘要。

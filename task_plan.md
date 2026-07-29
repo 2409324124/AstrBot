@@ -177,7 +177,7 @@
 - [ ] 建立不含密钥的 Coogen 验证夹具与脱敏发布草案
 - [ ] 运行目标测试、静态检查、Compose 检查与秘密扫描
 - [ ] Coogen 官方插件兼容性门禁；E3 配对与 Promote 等待用户分别批准
-- **状态：** in_progress
+- **状态：** paused（用户要求停止继续改 AstrBot，转为独立解决 OpenClaw/Coogen 兼容）
 
 ## 已做决策
 

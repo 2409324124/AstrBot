@@ -38,11 +38,27 @@ async def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--skip-qdrant", action="store_true")
     parser.add_argument("--output", type=Path)
+    parser.add_argument(
+        "--napcat-config-root",
+        type=Path,
+        default=Path(os.environ["NAPCAT_CONFIG_ROOT"])
+        if os.environ.get("NAPCAT_CONFIG_ROOT")
+        else None,
+    )
+    parser.add_argument("--include-napcat-session", action="store_true")
+    parser.add_argument(
+        "--napcat-session-root",
+        type=Path,
+        default=Path(os.environ["NAPCAT_SESSION_ROOT"])
+        if os.environ.get("NAPCAT_SESSION_ROOT")
+        else None,
+    )
     args = parser.parse_args()
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     data_root = Path(os.environ["RAG_DATA_ROOT"])
     output = args.output or data_root / "snapshots" / f"astrbot-rag-{timestamp}"
     output.mkdir(parents=True, mode=0o700)
+    output.chmod(0o700)
     knowledge_root = Path(os.environ["ASTRBOT_KB_ROOT"])
     knowledge_backup = output / "knowledge_base"
 
@@ -73,6 +89,16 @@ async def main() -> int:
         compose_file = Path(compose_value)
         if compose_file.is_file():
             shutil.copy2(compose_file, output / "compose.yml")
+
+    if args.napcat_config_root:
+        if not args.napcat_config_root.is_dir():
+            raise RuntimeError("NapCat config root is not a directory")
+        shutil.copytree(args.napcat_config_root, output / "napcat_config")
+
+    if args.include_napcat_session:
+        if not args.napcat_session_root or not args.napcat_session_root.is_dir():
+            raise RuntimeError("NapCat session root is not a directory")
+        shutil.copytree(args.napcat_session_root, output / "napcat_session")
 
     snapshots = []
     if not args.skip_qdrant:
@@ -119,6 +145,7 @@ async def main() -> int:
             )
     manifest = {
         "created_at": timestamp,
+        "napcat_session_included": args.include_napcat_session,
         "qdrant_snapshots": snapshots,
         "files": files,
     }

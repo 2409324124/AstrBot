@@ -4,14 +4,13 @@ version: '3.8'
 
 services:
   astrbot:
-    image: soulter/astrbot:latest
+    image: ${ASTRBOT_IMAGE:?ASTRBOT_IMAGE must be a pinned tag or digest}
     container_name: astrbot
-    restart: always
+    restart: unless-stopped
     security_opt:
       - no-new-privileges:true
     ports:
-      - "6185:6185" # AstrBot WebUI
-      - "6199:6199" # Optional. OneBot v11 Napcat Websocket Port
+      - "127.0.0.1:6185:6185" # AstrBot WebUI
     environment:
       - TZ=Asia/Shanghai
     volumes:

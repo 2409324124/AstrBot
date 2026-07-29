@@ -1,0 +1,35 @@
+{
+  "containers_before": {
+    "astrbot": {"id": "astrbot-a", "started_at": "stable"},
+    "napcat": {"id": "napcat-a", "started_at": "before"},
+    "astrbot-agent-gateway": {"id": "gateway-a", "started_at": "stable"},
+    "astrbot-qdrant": {"id": "qdrant-a", "started_at": "stable"},
+    "astrbot-embedding": {"id": "embedding-a", "started_at": "stable"}
+  },
+  "containers_after": {
+    "astrbot": {"id": "astrbot-a", "started_at": "stable"},
+    "napcat": {"id": "napcat-a", "started_at": "after"},
+    "astrbot-agent-gateway": {"id": "gateway-a", "started_at": "stable"},
+    "astrbot-qdrant": {"id": "qdrant-a", "started_at": "stable"},
+    "astrbot-embedding": {"id": "embedding-a", "started_at": "stable"}
+  },
+  "verification": {
+    "qdrant": {"reachable": true},
+    "embedding": {"healthy": true, "dimension": 1024, "finite": true},
+    "gateway": {"healthy": true, "ready": true},
+    "astrbot": {
+      "reachable": true,
+      "platforms": [
+        {"type": "qq_napcat", "status": "running", "error_count": 0}
+      ]
+    },
+    "napcat": {"isLogin": true, "online": true, "accountPresent": true},
+    "listeners": [
+      {"port": 6099, "address": "127.0.0.1"},
+      {"port": 6185, "address": "127.0.0.1"},
+      {"port": 6333, "address": "127.0.0.1"},
+      {"port": 8000, "address": "127.0.0.1"},
+      {"port": 8090, "address": "127.0.0.1"}
+    ]
+  }
+}

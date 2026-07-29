@@ -16,6 +16,8 @@ if [[ ! -f "${BACKUP_DIR}/manifest.json" ]]; then
   exit 1
 fi
 
+python3 "${SCRIPT_DIR}/validate_backup.py" "${BACKUP_DIR}"
+
 "${SCRIPT_DIR}/rollback.sh"
 astrbot_compose stop astrbot
 cp -a "${BACKUP_DIR}/knowledge_base/." "${ASTRBOT_KB_ROOT}/"
