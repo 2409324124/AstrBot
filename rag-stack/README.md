@@ -76,7 +76,7 @@ must search first. The script saves the original prompt in ignored
 ```
 
 Members can explicitly request a source-backed answer with
-`/research 问题` (aliases: `/研究`, `/检索`). In the shared-QQ-account setup,
+`~/research 问题`. In the shared-QQ-account setup,
 the human account takes a 15-minute, per-group priority lease whenever it sends
 a normal message. Send `云洁：让我bot来回答这个问题` as a reply to hand the
 quoted question back to the bot. A normal member saying e.g. `这群别开bot`

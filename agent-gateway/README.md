@@ -33,7 +33,7 @@ AstrBot QQ plugin -> POST /v1/events -> group allowlist -> semantic intent route
   bounded summary; the prompt reserves room for output, system instructions,
   and RAG evidence within the configured context window.
 - Gateway errors fail closed and never fall back to AstrBot's old LLM path.
-- `/new`, `/reset`, `/stop`, and `/stats` use an authenticated control endpoint
+- `~/new`, `~/reset`, `~/stop`, and `~/stats` use an authenticated control endpoint
   before routing, RAG, web search, or LLM execution. Reset is serialized with
   the same UMO so an aborted request cannot restore cleared history.
 
@@ -83,17 +83,17 @@ private QQ chat:
 
 ## QQ command boundary
 
-- Whitelisted group members may use `/new`, `/reset`, `/stop`, `/stats`,
-  `/help`, and `/research` (aliases `/研究` and `/检索`). Private controls remain
+- Whitelisted group members may use `~/new`, `~/reset`, `~/stop`, `~/stats`,
+  `~/help`, and `~/research <question>`. Private controls remain
   administrator-only.
-- `/new` clears Gateway memory and usage; `/reset` clears memory but retains
-  usage; `/stop` aborts the active router or answer; `/stats` reports completed
+- `~/new` clears Gateway memory and usage; `~/reset` clears memory but retains
+  usage; `~/stop` aborts the active router or answer; `~/stats` reports completed
   router and Agent calls.
 - `/sid` and administrator `/name` pass through to AstrBot transport commands.
   `/provider` redirects to `-astrbot切换 模型 <ID>`.
-- `/dashboard_update`, `/set`, `/unset`, and unknown slash commands are rejected
-  deterministically and never consume model tokens.
-- Explicit research bypasses semantic classification and performs Exa search
+- `/dashboard_update`, `/set`, `/unset`, and unknown slash commands are silently
+  intercepted and never consume model tokens.
+- Explicit `~/research <question>` bypasses semantic classification and performs Exa search
   before the answer model runs.
 
 ## Verification

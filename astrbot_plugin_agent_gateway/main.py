@@ -13,6 +13,11 @@ from astrbot.api.platform import MessageType
 from astrbot.builtin_stars.astrbot.group_chat_context import GroupChatContext
 
 from .client import GatewayClient
+from .command_parser import (
+    is_gateway_command_prefix,
+    legacy_migration_hint,
+    parse_gateway_command,
+)
 
 
 class Main(star.Star):
@@ -72,42 +77,55 @@ class Main(star.Star):
             "stop": "stop",
             "stats": "stats",
         }
+        migration_hint = legacy_migration_hint(normalized)
+        if migration_hint:
+            await event.send(MessageChain().message(migration_hint))
+            event.should_call_llm(False)
+            event.stop_event()
+            return
+
+        gateway_command = parse_gateway_command(normalized)
+        explicit_gateway_command = gateway_command is not None
+        if is_gateway_command_prefix(normalized) and not gateway_command:
+            await event.send(MessageChain().message("未知命令；使用 ~/help 查看可用命令"))
+            event.should_call_llm(False)
+            event.stop_event()
+            return
+        if gateway_command:
+            command, argument = gateway_command
+            if command == "help":
+                await event.send(MessageChain().message(self._command_help_text()))
+                event.should_call_llm(False)
+                event.stop_event()
+                return
+            if command in {"new", "reset", "stop", "stats"}:
+                if argument:
+                    await event.send(
+                        MessageChain().message(f"用法：~/{command}")
+                    )
+                else:
+                    await self._send_session_control(event, command)
+                event.should_call_llm(False)
+                event.stop_event()
+                return
+            if not argument:
+                await event.send(MessageChain().message("用法：~/research <问题>"))
+                event.should_call_llm(False)
+                event.stop_event()
+                return
+            normalized = argument
+            force_external_research = True
         control_handler = next(
             (name for name in control_actions if name in builtin_commands),
             None,
         )
         if control_handler:
-            payload: dict[str, Any] = {
-                "schema_version": "1",
-                "session_id": event.unified_msg_origin,
-                "action": control_actions[control_handler],
-                "chat_type": (
-                    "group" if message_type == MessageType.GROUP_MESSAGE else "private"
-                ),
-                "is_admin": bool(event.is_admin()),
-            }
-            if event.get_group_id():
-                payload["group_id"] = str(event.get_group_id())
-            try:
-                response = await self.client.control_session(payload)
-                text = response["message"]
-            except Exception as exc:
-                logger.warning(
-                    "Agent gateway session control failed: action=%s error_type=%s",
-                    control_actions[control_handler],
-                    type(exc).__name__,
-                )
-                text = "会话操作失败，请稍后重试"
-            await event.send(MessageChain().message(text))
+            await self._send_session_control(event, control_actions[control_handler])
             event.should_call_llm(False)
             event.stop_event()
             return
         if "help" in builtin_commands:
-            await event.send(
-                MessageChain().message(
-                    "命令：/new /reset /stop /stats /research；/sid；管理员可用 /name 和 -astrbot切换"
-                )
-            )
+            await event.send(MessageChain().message(self._command_help_text()))
             event.should_call_llm(False)
             event.stop_event()
             return
@@ -151,9 +169,6 @@ class Main(star.Star):
             for component in event.get_messages()
         )
         if raw_slash_command and not force_external_research:
-            await event.send(
-                MessageChain().message("未知或未启用的命令；使用 /help 查看可用命令")
-            )
             event.should_call_llm(False)
             event.stop_event()
             return
@@ -170,20 +185,21 @@ class Main(star.Star):
             if handoff:
                 normalized = handoff
             else:
-                owner_takeover_active = (
-                    await self.group_context.should_suppress_group_bot_reply(event)
-                )
-                if owner_takeover_active:
-                    event.should_call_llm(False)
-                    event.stop_event()
-                    return
-                if (
-                    not event.is_at_or_wake_command
-                    and not await self.group_context.need_active_reply(event)
-                ):
-                    event.should_call_llm(False)
-                    event.stop_event()
-                    return
+                if not explicit_gateway_command:
+                    owner_takeover_active = (
+                        await self.group_context.should_suppress_group_bot_reply(event)
+                    )
+                    if owner_takeover_active:
+                        event.should_call_llm(False)
+                        event.stop_event()
+                        return
+                    if (
+                        not event.is_at_or_wake_command
+                        and not await self.group_context.need_active_reply(event)
+                    ):
+                        event.should_call_llm(False)
+                        event.stop_event()
+                        return
 
         mentions = [
             str(component.qq)
@@ -294,6 +310,39 @@ class Main(star.Star):
                     await event.send(MessageChain().message(reply_text))
         event.should_call_llm(False)
         event.stop_event()
+
+    @staticmethod
+    def _command_help_text() -> str:
+        return (
+            "命令：~/new ~/reset ~/stop ~/stats ~/research <问题>；"
+            "/sid；管理员可用 /name 和 -astrbot切换"
+        )
+
+    async def _send_session_control(
+        self, event: AstrMessageEvent, action: str
+    ) -> None:
+        payload: dict[str, Any] = {
+            "schema_version": "1",
+            "session_id": event.unified_msg_origin,
+            "action": action,
+            "chat_type": (
+                "group" if event.get_message_type() == MessageType.GROUP_MESSAGE else "private"
+            ),
+            "is_admin": bool(event.is_admin()),
+        }
+        if event.get_group_id():
+            payload["group_id"] = str(event.get_group_id())
+        try:
+            response = await self.client.control_session(payload)
+            text = response["message"]
+        except Exception as exc:
+            logger.warning(
+                "Agent gateway session control failed: action=%s error_type=%s",
+                action,
+                type(exc).__name__,
+            )
+            text = "会话操作失败，请稍后重试"
+        await event.send(MessageChain().message(text))
 
     @staticmethod
     def _split_forward_text(text: str) -> list[str]:

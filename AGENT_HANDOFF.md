@@ -248,16 +248,16 @@ sudo docker exec astrbot \
 
 Gateway 切流后，以下命令在 QQ 插件入口截流，不进入普通意图/RAG/LLM：
 
-- `/new`：清 Gateway 会话和该会话 token 统计
-- `/reset`：清 Gateway 会话，保留统计
-- `/stop`：取消当前 Router/Pi Agent 请求
-- `/stats`：读取已完成调用统计，不调用模型
-- `/help`：程序固定回复
-- `/research`、`/研究`、`/检索`：明确强制外部研究
+- `~/new`：清 Gateway 会话和该会话 token 统计
+- `~/reset`：清 Gateway 会话，保留统计
+- `~/stop`：取消当前 Router/Pi Agent 请求
+- `~/stats`：读取已完成调用统计，不调用模型
+- `~/help`：程序固定回复
+- `~/research <问题>`：明确强制外部研究
 - `/sid`：放行 AstrBot
 - 管理员 `/name`：放行 AstrBot
 - `/provider`：提示改用 `-astrbot切换 模型 <ID>`
-- `/dashboard_update`、`/set`、`/unset` 和未知斜杠命令：固定拒绝，零 token
+- `/dashboard_update`、`/set`、`/unset` 和未知斜杠命令：静默截流，零 token
 
 权限：
 
@@ -334,7 +334,7 @@ sudo docker exec astrbot \
 
 ## 11. 仍需完成/继续观察
 
-1. 从真实 QQ 白名单群执行 `/stats`、`/new`，再问依赖旧记忆的问题，确认下一轮不携带旧会话。HTTP 控制端已验证，但真实 QQ 传输层验证仍应保留。
+1. 从真实 QQ 白名单群执行 `~/stats`、`~/new`，再问依赖旧记忆的问题，确认下一轮不携带旧会话。HTTP 控制端已验证，但真实 QQ 传输层验证仍应保留。
 2. 继续观察“号主实际发言后 15 分钟人工接管”与明确交还提示词。OneBot 无法可靠表达单纯的“号主在线”，只能根据号主真实发言建立活动窗口。
 3. RAG 路由边界必须维持：`local_knowledge` 自动 RAG；`technical_concept` 不自动注入，但可由 Agent 按需调用 RAG/Web；闲聊不应出现“知识库没有资料”。
 4. 群里的短省略追问必须把 OneBot Reply 正文作为 `reply_context` 传给 Router、检索和回答。不要退回仅按当前短文本分类。
