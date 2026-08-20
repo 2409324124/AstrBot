@@ -20,17 +20,13 @@ def parse_gateway_command(text: str) -> tuple[str, str] | None:
     return command, parts[1] if len(parts) == 2 else ""
 
 
-def legacy_migration_hint(text: str) -> str | None:
-    """Return the one-line migration hint for retired Gateway slash commands."""
+def is_retired_gateway_slash_command(text: str) -> bool:
+    """Return whether text uses a retired Gateway slash command."""
     normalized = text.strip()
     if not normalized.startswith("/"):
-        return None
+        return False
     command, _, _argument = normalized[1:].partition(" ")
     command = command.lower()
     aliases = {"研究": "research", "检索": "research"}
     command = aliases.get(command, command)
-    if command not in _TILDE_COMMANDS:
-        return None
-    if command == "research":
-        return "命令已迁移：请使用 ~/research <问题>"
-    return f"命令已迁移：请使用 ~/{command}"
+    return command in _TILDE_COMMANDS

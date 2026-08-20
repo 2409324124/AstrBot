@@ -88,14 +88,15 @@ async def test_tilde_new_uses_gateway_session_control_without_llm():
 
 
 @pytest.mark.asyncio
-async def test_legacy_slash_command_returns_migration_hint_without_gateway_call():
+@pytest.mark.parametrize("text", ["/new", "/stats"])
+async def test_legacy_slash_command_is_silent_without_gateway_call(text: str):
     client = FakeGatewayClient()
-    event = FakeEvent("/new")
+    event = FakeEvent(text)
 
     await gateway_with(client).route_to_gateway(event)
 
     assert client.controls == []
-    assert len(event.sent) == 1
+    assert event.sent == []
     assert event.llm_enabled == [False]
     assert event.stopped
 

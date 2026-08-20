@@ -15,7 +15,7 @@ from astrbot.builtin_stars.astrbot.group_chat_context import GroupChatContext
 from .client import GatewayClient
 from .command_parser import (
     is_gateway_command_prefix,
-    legacy_migration_hint,
+    is_retired_gateway_slash_command,
     parse_gateway_command,
 )
 
@@ -77,9 +77,7 @@ class Main(star.Star):
             "stop": "stop",
             "stats": "stats",
         }
-        migration_hint = legacy_migration_hint(normalized)
-        if migration_hint:
-            await event.send(MessageChain().message(migration_hint))
+        if is_retired_gateway_slash_command(normalized):
             event.should_call_llm(False)
             event.stop_event()
             return

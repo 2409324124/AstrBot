@@ -93,6 +93,8 @@ private QQ chat:
   `/provider` redirects to `-astrbot切换 模型 <ID>`.
 - `/dashboard_update`, `/set`, `/unset`, and unknown slash commands are silently
   intercepted and never consume model tokens.
+- Retired Gateway controls such as `/new` and `/stats` are also silently
+  intercepted; use their `~/` forms instead.
 - Explicit `~/research <question>` bypasses semantic classification and performs Exa search
   before the answer model runs.
 
