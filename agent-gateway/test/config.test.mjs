@@ -17,6 +17,7 @@ test("gateway config validates secrets and parses bounded runtime values", () =>
     LLM_BASE_URL: "https://api.deepseek.com",
     LLM_API_KEY: "llm-secret",
     LLM_MODEL: "deepseek-v4-pro",
+    OUTBOUND_HTTP_PROXY: "http://192.168.31.224:7890",
     GROUP_WHITELIST: "709694410, 89589336,709694410",
     RAG_EVIDENCE_THRESHOLD: "0.03",
     AGENT_TIMEOUT_MS: "90000"
@@ -30,6 +31,7 @@ test("gateway config validates secrets and parses bounded runtime values", () =>
   assert.equal(config.routerModel, "deepseek-v4-pro");
   assert.equal(config.routerTimeoutMs, 30000);
   assert.equal(config.routerMaxOutputTokens, 512);
+  assert.equal(config.outboundHttpProxy, "http://192.168.31.224:7890");
   assert.equal(config.gatewayTimezone, "Asia/Shanghai");
   assert.deepEqual(config.groupWhitelist, ["709694410", "89589336"]);
 });
@@ -49,4 +51,22 @@ test("gateway config rejects malformed group whitelist entries", () => {
     GROUP_WHITELIST: "709694410,all"
   };
   assert.throws(() => loadConfig(env), /GROUP_WHITELIST/);
+});
+
+test("gateway config rejects non-HTTP outbound proxies", () => {
+  const env = {
+    EVENT_TOKEN: "event-secret",
+    ADMIN_TOKEN: "admin-secret",
+    QDRANT_URL: "http://qdrant:6333",
+    QDRANT_API_KEY: "qdrant-secret",
+    EMBEDDING_BASE_URL: "http://embedding-server:8000/v1",
+    EMBEDDING_API_KEY: "embedding-secret",
+    EXA_API_KEY: "exa-secret",
+    LLM_BASE_URL: "https://api.deepseek.com",
+    LLM_API_KEY: "llm-secret",
+    LLM_MODEL: "deepseek-v4-pro",
+    GROUP_WHITELIST: "709694410",
+    OUTBOUND_HTTP_PROXY: "socks5://127.0.0.1:10808"
+  };
+  assert.throws(() => loadConfig(env), /OUTBOUND_HTTP_PROXY/);
 });

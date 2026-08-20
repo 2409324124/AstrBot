@@ -14,6 +14,7 @@ export type GatewayConfig = {
   llmBaseUrl: string;
   llmApiKey: string;
   llmModel: string;
+  outboundHttpProxy?: string;
   routerModel: string;
   routerTimeoutMs: number;
   routerMaxOutputTokens: number;
@@ -42,6 +43,23 @@ function required(env: NodeJS.ProcessEnv, name: string): string {
     throw new Error(`${name} is required`);
   }
   return value;
+}
+
+function optionalHttpUrl(env: NodeJS.ProcessEnv, name: string): string | undefined {
+  const value = env[name]?.trim();
+  if (!value) {
+    return undefined;
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error(`${name} must be a valid HTTP(S) URL`);
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(`${name} must be a valid HTTP(S) URL`);
+  }
+  return parsed.toString().replace(/\/$/u, "");
 }
 
 function boundedNumber(
@@ -81,6 +99,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): GatewayConfig {
     llmBaseUrl: required(env, "LLM_BASE_URL"),
     llmApiKey: required(env, "LLM_API_KEY"),
     llmModel: required(env, "LLM_MODEL"),
+    outboundHttpProxy: optionalHttpUrl(env, "OUTBOUND_HTTP_PROXY"),
     routerModel: env.ROUTER_MODEL?.trim() || required(env, "LLM_MODEL"),
     routerTimeoutMs: boundedNumber(
       env,

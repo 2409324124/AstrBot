@@ -49,6 +49,11 @@ comma-separated list of QQ group IDs. Do not commit the real file.
 to 512; reasoning models may consume most of a smaller limit before producing
 their JSON decision.
 
+Set `OUTBOUND_HTTP_PROXY` only when the container needs an HTTP(S) egress
+proxy for the online LLM or web tools. The Gateway installs it before creating
+clients and explicitly bypasses `qdrant`, `embedding-server`, and loopback
+addresses, so local BGE-M3 and Qdrant remain on the Docker network.
+
 Start the sidecar through `rag-stack/docker-compose.yml` while keeping
 `AGENT_GATEWAY_ENABLED=false` until acceptance tests pass.
 

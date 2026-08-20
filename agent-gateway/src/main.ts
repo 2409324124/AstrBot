@@ -15,12 +15,14 @@ import { GatewayAgent } from "./gateway-agent.ts";
 import { RuntimeIntentRouter } from "./intent-router.ts";
 import { ConversationMemory } from "./memory.ts";
 import { OpenMeteoClient } from "./open-meteo.ts";
+import { installOutboundProxy } from "./network-proxy.ts";
 import { PiAgentRuntime } from "./pi-runtime.ts";
 import { HybridRag, OpenAIEmbeddingClient } from "./rag.ts";
 import { SqliteGatewayStore } from "./store.ts";
 
 export function buildApp(env: NodeJS.ProcessEnv) {
   const config = loadConfig(env);
+  installOutboundProxy(config.outboundHttpProxy);
   const store = new SqliteGatewayStore(config.databasePath);
   const persistedAdminConfig = store.getAdminConfig();
   const activeModelId = persistedAdminConfig?.model ?? config.llmModel;
