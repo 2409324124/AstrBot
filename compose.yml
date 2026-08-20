@@ -11,6 +11,7 @@ services:
       - no-new-privileges:true
     ports:
       - "127.0.0.1:6185:6185" # AstrBot WebUI
+      - "127.0.0.1:6199:6199" # OneBot v11 reverse WebSocket for host-network NapCat
     environment:
       - TZ=Asia/Shanghai
     volumes:
